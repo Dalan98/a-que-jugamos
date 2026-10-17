@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>¿A qué jugamos?</title>
+<meta name="description" content="Decidid entre amigos a qué juego de Steam jugar, deslizando cartas como en Tinder.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: una columna tipo app móvil (máx. 460px); lobby, selector de temáticas y sala con mazo de cartas deslizables. Tema oscuro único: noche de juegos. */
+:root{
+  --bg:#101119; --panel:#191b26; --panel-2:#222534; --line:#2e3244;
+  --fg:#eef0f7; --muted:#9097ad; --accent:#ffb547; --accent-ink:#1d1305;
+  --yes:#3ddc97; --no:#ff5d73;
+  --display:"Unbounded", "Arial Black", system-ui, sans-serif;
+  --body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+[hidden]{display:none!important}
+.app{max-width:460px;margin:0 auto;padding-inline:16px;padding-block:18px 32px;display:flex;flex-direction:column;gap:18px;min-height:100%}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:26px;font-weight:800}
+h2{font-size:17px;font-weight:600}
+p{margin:0}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand .mark{display:inline-flex;gap:4px;align-items:center}
+.brand .mark i{width:12px;height:18px;border-radius:3px;display:block}
+.brand .mark i:nth-child(1){background:var(--no);transform:rotate(-12deg)}
+.brand .mark i:nth-child(2){background:var(--accent)}
+.brand .mark i:nth-child(3){background:var(--yes);transform:rotate(12deg)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+label,.label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px}
+input[type=text],select{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font:inherit;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1 1 120px;min-width:0}
+button{font:inherit;cursor:pointer;border-radius:10px;padding:11px 14px;font-weight:700;color:var(--fg);background:var(--panel-2);border:1px solid var(--line)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--fg);text-transform:none;letter-spacing:0;font-weight:500}
+.check input{accent-color:var(--accent);width:18px;height:18px}
+.code-input{font-family:var(--display)!important;letter-spacing:.3em;text-transform:uppercase;text-align:center;font-size:20px!important}
+.room-item{display:flex;align-items:center;gap:12px;padding:10px 12px;text-align:left;font-weight:500;border-radius:12px}
+.room-item .code{font-family:var(--display);font-weight:800;letter-spacing:.12em;color:var(--accent);font-size:16px}
+.room-item .meta{flex:1;min-width:0;font-size:13px;color:var(--muted)}
+.err{color:var(--no);font-size:13px;min-height:1em}
+.net{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;color:var(--accent)}
+
+/* Temáticas */
+.themes{display:flex;flex-wrap:wrap;gap:8px}
+.theme{padding:8px 12px;border-radius:999px;font-weight:600;font-size:14px;background:var(--panel-2);border:1px solid var(--line);color:var(--fg)}
+.theme .n{color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums;margin-left:4px}
+.theme[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.theme[aria-pressed="true"] .n{color:var(--accent-ink);opacity:.7}
+
+/* Sala */
+.room-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.room-code{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.18em;color:var(--accent)}
+.members{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 4px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-size:13px;font-weight:600}
+.chip.off{opacity:.5}
+.chip .dot{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:#111}
+.chip .prog{color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums}
+.stats{display:flex;gap:14px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;flex-wrap:wrap;align-items:center}
+.stats b{color:var(--fg)}
+.stats .link{margin-left:auto}
+
+.stage{position:relative;height:500px;touch-action:none;user-select:none}
+.card{position:absolute;inset:0;border-radius:22px;overflow:hidden;background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,.4);will-change:transform}
+.card.behind{transform:scale(.95) translateY(14px);filter:brightness(.6)}
+.card.top{cursor:grab}
+.card.top:active{cursor:grabbing}
+.cover{position:relative;aspect-ratio:460/215;max-width:100%;flex:0 0 auto;overflow:hidden;background:var(--panel-2)}
+.cover img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none}
+.cover .fallback{position:absolute;inset:0;display:flex;align-items:flex-end;padding:14px;font-family:var(--display);font-weight:800;font-size:22px;color:#fff}
+.proposal{position:absolute;left:10px;bottom:10px;background:var(--yes);color:#06261a;font-weight:700;font-size:12px;padding:4px 10px;border-radius:999px}
+.info{padding:14px 18px 16px;display:flex;flex-direction:column;gap:9px;flex:1 1 auto;min-height:0;overflow:hidden}
+.info h3{font-size:20px;font-weight:800}
+.genre{color:var(--muted);font-size:13px;font-weight:600;margin-top:-4px}
+.badges{display:flex;gap:6px;flex-wrap:wrap}
+.badge{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);color:var(--fg);font-variant-numeric:tabular-nums}
+.badge.free{color:var(--yes);border-color:color-mix(in srgb,var(--yes) 45%,transparent)}
+.badge.mine{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.desc{color:var(--muted);font-size:14px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.card-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.steam{color:var(--accent);font-weight:600;font-size:13px;text-decoration:none;flex:0 0 auto}
+.steam:hover{text-decoration:underline}
+.likedby{font-size:12px;color:var(--yes);font-weight:600;min-width:0}
+.stamp{position:absolute;top:22px;font-family:var(--display);font-weight:800;font-size:26px;padding:4px 12px;border:4px solid;border-radius:10px;opacity:0;pointer-events:none;background:rgba(16,17,25,.55)}
+.stamp.yes{left:20px;color:var(--yes);transform:rotate(-14deg)}
+.stamp.no{right:20px;color:var(--no);transform:rotate(14deg)}
+
+.actions{display:flex;justify-content:center;gap:22px}
+.round{width:66px;height:66px;border-radius:50%;padding:0;display:grid;place-items:center;font-size:26px;background:var(--panel)}
+.round.no{color:var(--no);border:2px solid var(--no)}
+.round.yes{color:var(--yes);border:2px solid var(--yes)}
+.round:hover{background:var(--panel-2)}
+.hint{text-align:center;font-size:12px;color:var(--muted)}
+
+.rank{display:flex;flex-direction:column;gap:8px}
+.rank-row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;font-size:14px}
+.rank-row span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{grid-column:1/-1;height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--yes)}
+.num{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+
+.match{position:fixed;inset:0;background:rgba(8,9,14,.9);display:grid;place-items:center;padding:20px 16px;z-index:10;overflow:auto}
+.match-box{max-width:420px;width:100%;display:flex;flex-direction:column;gap:14px;text-align:center;align-items:center}
+.match-box .big{font-family:var(--display);font-weight:800;font-size:44px;color:var(--yes);line-height:1}
+.match-box .card{position:relative;height:auto;width:100%;text-align:left}
+.match-box .btns{display:flex;flex-direction:column;gap:8px;width:100%}
+.primary-link{display:block;background:var(--accent);color:var(--accent-ink);border-radius:10px;padding:11px 14px;font-weight:700;text-decoration:none}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line);padding:10px 14px;border-radius:10px;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
+@media (max-width:380px){.stage{height:540px}}
+@media (prefers-reduced-motion:reduce){.card{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="brand">
+    <h1>¿A qué jugamos?</h1>
+    <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+  </header>
+  <div class="net" id="net" hidden></div>
+
+  <!-- LOBBY -->
+  <section id="lobby" class="stack">
+    <p class="muted">Cread una sala y elegid vuestras temáticas favoritas. Deslizad a la derecha los juegos de Steam que os apetezcan y a la izquierda los que no. Un solo «no» descarta el juego para todos. Cuando a alguien le gusta uno, aparece en el mazo de los demás. Si a todos os gusta el mismo, hay match.</p>
+    <p class="muted small" id="catInfo"></p>
+
+    <div class="panel">
+      <div class="field">
+        <label for="nick">Tu apodo</label>
+        <input type="text" id="nick" maxlength="20" placeholder="Por ejemplo: Dani" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="panel" id="resumePanel" hidden></div>
+
+    <div class="panel">
+      <h2>Unirse a una sala</h2>
+      <div class="row">
+        <input type="text" id="joinCode" class="code-input" maxlength="4" placeholder="ABCD" autocomplete="off" aria-label="Código de la sala">
+        <button class="primary" id="joinBtn">Entrar</button>
+      </div>
+      <div class="err" id="joinErr"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Crear sala nueva</h2>
+      <div class="row">
+        <div class="field">
+          <label for="fMode">Modo</label>
+          <select id="fMode">
+            <option value="any">Cualquiera</option>
+            <option value="c">Cooperativo</option>
+            <option value="p">Competitivo</option>
+          </select>
+        </div>
+        <div class="field" style="justify-content:flex-end">
+          <label class="check" for="fFree"><input type="checkbox" id="fFree"> Solo gratuitos</label>
+        </div>
+      </div>
+      <div class="muted small" id="fCount"></div>
+      <p class="muted small">La sala vive en tu navegador: mantén esta página abierta mientras jugáis a decidir.</p>
+      <button class="primary" id="createBtn">Crear sala</button>
+      <div class="err" id="createErr"></div>
+    </div>
+  </section>
+
+  <!-- TEMÁTICAS -->
+  <section id="picker" class="stack" hidden>
+    <div>
+      <h2>¿Qué te apetece?</h2>
+      <p class="muted small" style="margin-top:6px">Elige las temáticas que te gustan y verás primero esos juegos. Los juegos que gusten a tus amigos te aparecerán igualmente. Si no eliges ninguna, verás de todo.</p>
+    </div>
+    <div class="themes" id="themeList"></div>
+    <div class="row">
+      <button id="themeClear">Todas me valen</button>
+      <button class="primary" id="themeSave">Empezar a votar</button>
+    </div>
+  </section>
+
+  <!-- SALA -->
+  <section id="room" class="stack" hidden>
+    <div class="room-head">
+      <div>
+        <div class="muted small" id="roleLabel">Código de la sala</div>
+        <div class="room-code" id="rCode">----</div>
+      </div>
+      <div class="row" style="flex:0 0 auto;gap:8px">
+        <button id="copyBtn">Invitar</button>
+        <button id="leaveBtn">Salir</button>
+      </div>
+    </div>
+    <div class="panel" id="inviteBox" hidden>
+      <label for="inviteLink">Enlace de invitación</label>
+      <input type="text" id="inviteLink" readonly>
+      <p class="small muted" id="inviteMsg"></p>
+      <button class="link" id="inviteClose" style="align-self:flex-start">Cerrar</button>
+    </div>
+    <div class="panel" id="leaveConfirm" hidden>
+      <p class="small">Eres el anfitrión: si sales, la sala se cierra para todos.</p>
+      <div class="row"><button id="leaveYes">Cerrar la sala</button><button class="link" id="leaveNo">Seguir aquí</button></div>
+    </div>
+    <div class="members" id="members"></div>
+    <div class="stats" id="stats"></div>
+    <div id="play"></div>
+    <div class="panel" id="rankPanel"></div>
+  </section>
+</div>
+<div class="match" id="match" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = {
+  get(k){ try{ return localStorage.getItem(k) }catch(e){ return null } },
+  set(k,v){ try{ localStorage.setItem(k,v) }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k) }catch(e){} },
+  json(k){ try{ return JSON.parse(localStorage.getItem(k)) }catch(e){ return null } },
+};
+function hash(s){ let h=2166136261; for (const c of String(s)) { h^=c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
+function rng(seed){ let a=seed>>>0; return ()=>{ a=(a+0x6D2B79F5)>>>0; let t=a; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; }; }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true,3400); }
+function show(id){ for(const s of ["lobby","picker","room"]) $("#"+s).hidden = s!==id; }
+function netStatus(msg){ const n=$("#net"); n.textContent=msg||""; n.hidden=!msg; }
+const MODE_LABEL = {c:"Cooperativo",p:"Competitivo",a:"Coop y competitivo",any:"Cualquier modo"};
+const PREFIX = "aqj-steam-v1-";
+
+/* ---------- Catálogo: games.json, que una GitHub Action regenera a diario desde la API de Steam ---------- */
+let THEMES=[], CATALOG=[], BY_ID={};
+async function loadCatalog(){
+  $("#catInfo").textContent="Cargando catálogo de Steam…";
+  const r=await fetch("games.json",{cache:"no-cache"});
+  if(!r.ok) throw new Error(r.status);
+  const CAT=await r.json();
+  THEMES=CAT.themes.map(([key,label])=>({key,label}));
+  CATALOG=CAT.games.map(([id,name,desc,t,m,f,p,r,n,g],idx)=>({id,name,desc,themes:t.map(x=>THEMES[x].key),mode:m,free:!!f,price:p,score:r,reviews:n,genre:g,pop:idx}));
+  BY_ID=Object.fromEntries(CATALOG.map(g=>[g.id,g]));
+  const when=new Date(CAT.updated).toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"});
+  $("#catInfo").textContent=`${CATALOG.length} juegos multijugador de Steam con buenas reseñas · precios y reseñas de Steam actualizados el ${when}.`;
+}
+function roomPool(f){ f=f||{mode:"any",free:false}; return CATALOG.filter(g=>(f.mode==="any"||!f.mode||g.mode===f.mode||g.mode==="a") && (!f.free||g.free)); }
+
+/* ---------- Identidad local (sin cuentas) ---------- */
+// Una identidad por pestaña: así dos pestañas del mismo navegador cuentan como dos personas.
+let uid=null;
+try{ uid=sessionStorage.getItem("clientId"); }catch(e){}
+if(!uid){ uid=Math.random().toString(36).slice(2)+Date.now().toString(36); try{ sessionStorage.setItem("clientId",uid); }catch(e){} }
+
+const S = { code:null, room:null, votes:{}, mine:null, dismissed:new Set(), topId:null, confirmReset:false, nick:"" };
+const NET = { peer:null, isHost:false, H:null, conns:new Set(), hostConn:null, connected:false, everConnected:false, leaving:false, retryT:null, tries:0 };
+
+/* ---------- Lobby ---------- */
+// El apodo se recuerda por pestaña (y en el navegador como valor por defecto).
+function saveNick(n){ store.set("nick",n); try{ sessionStorage.setItem("nick",n); }catch(e){} }
+let tabNick=null; try{ tabNick=sessionStorage.getItem("nick"); }catch(e){}
+$("#nick").value=tabNick||store.get("nick")||"";
+$("#nick").addEventListener("change",e=>saveNick(e.target.value.trim()));
+const hashCode=(location.hash||"").replace("#","").toUpperCase();
+if(/^[A-Z]{4}$/.test(hashCode)) $("#joinCode").value=hashCode;
+
+function updateCount(){
+  if(!CATALOG.length){ $("#createBtn").disabled=true; return; }
+  const n=roomPool({mode:$("#fMode").value,free:$("#fFree").checked}).length;
+  $("#fCount").textContent = n ? `${n} juegos encajan con estos filtros.` : "Ningún juego encaja. Prueba a quitar algún filtro.";
+  $("#createBtn").disabled=!n;
+}
+["#fMode","#fFree"].forEach(s=>$(s).addEventListener("change",updateCount));
+updateCount();
+
+function needNick(errEl){
+  const n=$("#nick").value.trim();
+  if(!n){ errEl.textContent="Escribe tu apodo arriba para que tus amigos sepan quién eres."; $("#nick").focus(); return null; }
+  saveNick(n); return n;
+}
+function peerReady(errEl){
+  if(!CATALOG.length){ errEl.textContent="El catálogo de juegos aún no se ha cargado. Espera un momento o recarga la página."; return false; }
+  if(typeof Peer==="undefined"){ errEl.textContent="No se pudo cargar la conexión entre navegadores. Revisa tu conexión a internet y recarga."; return false; }
+  return true;
+}
+
+function renderResume(){
+  const code=store.get("hosting"), st=code&&store.json("host:"+code);
+  const last=store.get("lastRoom");
+  const p=$("#resumePanel");
+  if(st){
+    p.innerHTML=`<span class="label">Tu sala</span><button class="room-item" id="resumeBtn"><span class="code">${esc(code)}</span><span class="meta">Eres el anfitrión · ${Object.keys(st.members).length} en la sala · ronda ${st.round}</span><span aria-hidden="true">→</span></button>`;
+    p.hidden=false; $("#resumeBtn").onclick=()=>{ const n=needNick($("#createErr")); if(n) startHost(code,n,st); };
+  } else if(last){
+    p.innerHTML=`<span class="label">Última sala</span><button class="room-item" id="resumeBtn"><span class="code">${esc(last)}</span><span class="meta">Volver a entrar</span><span aria-hidden="true">→</span></button>`;
+    p.hidden=false; $("#resumeBtn").onclick=()=>joinCode(last);
+  } else p.hidden=true;
+}
+
+$("#createBtn").addEventListener("click",()=>{
+  const err=$("#createErr"); err.textContent="";
+  const nick=needNick(err); if(!nick||!peerReady(err)) return;
+  const old=store.get("hosting"); if(old) store.del("host:"+old);
+  const letters="ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const code=Array.from({length:4},()=>letters[Math.floor(Math.random()*letters.length)]).join("");
+  startHost(code,nick,{ code, createdAt:Date.now(), round:1, filters:{mode:$("#fMode").value,free:$("#fFree").checked}, members:{} }, true);
+});
+$("#joinBtn").addEventListener("click",joinFromInput);
+$("#joinCode").addEventListener("keydown",e=>{ if(e.key==="Enter") joinFromInput(); });
+function joinFromInput(){
+  const code=$("#joinCode").value.trim().toUpperCase();
+  if(!/^[A-Z]{4}$/.test(code)){ $("#joinErr").textContent="El código tiene 4 letras."; return; }
+  joinCode(code);
+}
+function joinCode(code){
+  const err=$("#joinErr"); err.textContent="";
+  const nick=needNick(err); if(!nick||!peerReady(err)) return;
+  const st=store.get("hosting")===code && store.json("host:"+code);
+  if(st && st.hostId===uid) return startHost(code,nick,st); // esta pestaña es la del anfitrión (p. ej. tras recargar)
+  startGuest(code,nick);
+}
+
+/* ---------- Anfitrión: su navegador guarda la sala y la reparte ---------- */
+function startHost(code, nick, state, isNew){
+  resetSession(code,nick); NET.isHost=true; NET.H=state;
+  if(state.hostId && state.hostId!==uid){ uid=state.hostId; try{ sessionStorage.setItem("clientId",uid); }catch(e){} }
+  state.hostId=uid;
+  const me=state.members[uid];
+  if(me?.name && !isNew){ nick=me.name; S.nick=nick; $("#nick").value=nick; }
+  S.mine = me ? {...me, likes:[...me.likes], nopes:[...me.nopes], themes:[...me.themes]} : { round:state.round, likes:[], nopes:[], themes:[], themesSet:false, rev:0 };
+  state.members[uid]={...S.mine, name:nick, joinedAt:me?.joinedAt||Date.now(), online:true};
+  netStatus("Abriendo la sala…");
+  const open=()=>{
+    const peer=new Peer(PREFIX+code); NET.peer=peer;
+    peer.on("open",()=>{
+      NET.tries=0; netStatus(""); store.set("hosting",code); store.set("lastRoom",code);
+      if(isNew) history.replaceState(null,"","#"+code);
+      hostBroadcast(); enterRoomUI();
+    });
+    peer.on("connection",conn=>hostAccept(conn));
+    peer.on("disconnected",()=>{ if(!NET.leaving){ netStatus("Reconectando con el servidor…"); setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); } });
+    peer.on("error",e=>{
+      if(e.type==="unavailable-id"){
+        peer.destroy();
+        if(isNew){ $("#createBtn").click(); return; } // código ocupado: probar otro
+        if(++NET.tries<12){ netStatus("Recuperando tu sala… (unos segundos)"); setTimeout(open,3000); }
+        else { netStatus(""); toast("No se pudo recuperar la sala. Crea una nueva."); exitRoom(); }
+      } else if(["network","server-error","socket-error","socket-closed"].includes(e.type)){
+        netStatus("Sin conexión con el servidor. Reintentando…");
+      }
+    });
+  };
+  open();
+}
+function hostAccept(conn){
+  conn.on("open",()=>NET.conns.add(conn));
+  conn.on("data",msg=>hostHandle(conn,msg));
+  conn.on("close",()=>{ NET.conns.delete(conn); const m=conn.clientId&&NET.H.members[conn.clientId]; if(m){ m.online=false; hostBroadcast(); } });
+  conn.on("error",()=>{});
+}
+function hostHandle(conn,msg){
+  const H=NET.H; if(!msg||typeof msg!=="object") return;
+  const id=String(msg.id||conn.clientId||""); if(!id) return;
+  const clean=m=>({ name:String(m?.name||"Alguien").slice(0,20), round:+m?.round||0, rev:+m?.rev||0,
+    likes:(Array.isArray(m?.likes)?m.likes:[]).filter(x=>BY_ID[x]), nopes:(Array.isArray(m?.nopes)?m.nopes:[]).filter(x=>BY_ID[x]),
+    themes:(Array.isArray(m?.themes)?m.themes:[]).filter(k=>THEMES.some(t=>t.key===k)), themesSet:!!m?.themesSet });
+  if(msg.t==="hello"||msg.t==="me"){
+    conn.clientId=id;
+    const m=clean(msg.member), cur=H.members[id];
+    if(!cur){ H.members[id]={ ...m, round:H.round, likes:m.round===H.round?m.likes:[], nopes:m.round===H.round?m.nopes:[], joinedAt:Date.now(), online:true }; }
+    else {
+      cur.name=m.name; cur.themes=m.themes; cur.themesSet=m.themesSet; cur.online=true;
+      if(m.round===H.round && m.rev>=(cur.rev||0)){ cur.likes=m.likes; cur.nopes=m.nopes; cur.rev=m.rev; }
+    }
+    hostBroadcast();
+  } else if(msg.t==="round"){ hostNewRound(); }
+  else if(msg.t==="leave"){ delete H.members[id]; hostBroadcast(); }
+}
+function hostNewRound(){
+  const H=NET.H; H.round++;
+  for(const m of Object.values(H.members)){ m.likes=[]; m.nopes=[]; m.round=H.round; m.rev=(m.rev||0)+1; }
+  const me=H.members[uid]; S.mine={...S.mine, round:H.round, likes:[], nopes:[], rev:me.rev};
+  hostBroadcast();
+}
+let bcT=null;
+function hostBroadcast(){
+  const H=NET.H; if(!H) return;
+  H.members[uid]={...H.members[uid], ...S.mine, likes:[...S.mine.likes], nopes:[...S.mine.nopes], name:S.nick, online:true};
+  store.set("host:"+H.code, JSON.stringify(H));
+  applyState(H);
+  clearTimeout(bcT);
+  bcT=setTimeout(()=>{ const msg={t:"state",state:H}; NET.conns.forEach(c=>{ try{ if(c.open) c.send(msg); }catch(e){} }); },60);
+}
+
+/* ---------- Invitado: se conecta al navegador del anfitrión ---------- */
+function startGuest(code,nick){
+  resetSession(code,nick); NET.isHost=false;
+  const saved=store.json("mine:"+code);
+  S.mine = saved || { round:0, likes:[], nopes:[], themes:[], themesSet:false, rev:0 };
+  netStatus(`Conectando con la sala ${code}…`);
+  const peer=new Peer(); NET.peer=peer;
+  peer.on("open",()=>guestConnect());
+  peer.on("disconnected",()=>{ if(!NET.leaving) setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); });
+  peer.on("error",e=>{
+    if(e.type==="peer-unavailable"){
+      if(!NET.everConnected){ netStatus(""); $("#joinErr").textContent=`No hay ninguna sala abierta con el código ${code}. Comprueba el código o pide al anfitrión que abra la página.`; exitRoom(true); }
+      else { netStatus("El anfitrión se ha desconectado. Esperando a que vuelva…"); scheduleRetry(); }
+    } else if(["network","server-error","socket-error","socket-closed"].includes(e.type)){ netStatus("Sin conexión. Reintentando…"); scheduleRetry(); }
+  });
+}
+function guestConnect(){
+  if(NET.leaving||!NET.peer||NET.peer.destroyed) return;
+  if(NET.peer.disconnected){ try{ NET.peer.reconnect(); }catch(e){} scheduleRetry(); return; }
+  const conn=NET.peer.connect(PREFIX+S.code,{reliable:true}); NET.hostConn=conn;
+  conn.on("open",()=>{ NET.connected=true; NET.everConnected=true; netStatus(""); conn.send({t:"hello",id:uid,member:mineRecord()}); });
+  conn.on("data",msg=>{ if(msg?.t==="state") { applyState(msg.state); if($("#room").hidden&&$("#picker").hidden) enterRoomUI(); } });
+  conn.on("close",()=>{ NET.connected=false; if(!NET.leaving){ netStatus("Se perdió la conexión con el anfitrión. Reconectando…"); scheduleRetry(); } });
+  conn.on("error",()=>{});
+}
+function scheduleRetry(){ clearTimeout(NET.retryT); NET.retryT=setTimeout(guestConnect,3000); }
+function mineRecord(){ return { name:S.nick, round:S.mine.round, rev:S.mine.rev, likes:S.mine.likes, nopes:S.mine.nopes, themes:S.mine.themes, themesSet:S.mine.themesSet }; }
+
+/* ---------- Común ---------- */
+function resetSession(code,nick){
+  teardown();
+  Object.assign(S,{ code, nick, room:null, votes:{}, mine:null, dismissed:new Set(), topId:null, confirmReset:false });
+  Object.assign(NET,{ leaving:false, connected:false, everConnected:false, tries:0, conns:new Set(), hostConn:null, H:null });
+  $("#rCode").textContent=code;
+}
+function teardown(){ clearTimeout(NET.retryT); if(NET.peer){ NET.leaving=true; try{ NET.peer.destroy(); }catch(e){} NET.peer=null; } }
+
+function applyState(st){
+  S.room={ code:st.code, round:st.round, filters:st.filters };
+  S.votes=st.members||{};
+  const rec=S.votes[uid];
+  if(!NET.isHost && rec){
+    if(rec.round!==S.mine.round || (rec.rev||0)>(S.mine.rev||0) || !S.mine.themesSet && rec.themesSet){
+      if(rec.round!==S.mine.round){ S.dismissed=new Set(); S.topId=null; }
+      S.mine={ round:rec.round, rev:rec.rev||0, likes:[...rec.likes], nopes:[...rec.nopes], themes:[...rec.themes], themesSet:!!rec.themesSet };
+      store.set("mine:"+S.code, JSON.stringify(S.mine));
+    }
+  }
+  render();
+}
+function enterRoomUI(){
+  store.set("lastRoom",S.code);
+  $("#roleLabel").textContent = NET.isHost ? "Tu sala (eres el anfitrión)" : "Código de la sala";
+  if(S.mine.themesSet) show("room"); else openPicker();
+  render();
+}
+function saveMine(){
+  S.mine.rev=(S.mine.rev||0)+1;
+  if(NET.isHost){ hostBroadcast(); return; }
+  store.set("mine:"+S.code, JSON.stringify(S.mine));
+  try{ if(NET.hostConn?.open) NET.hostConn.send({t:"me",id:uid,member:mineRecord()}); }catch(e){}
+}
+function exitRoom(keepError){
+  teardown(); S.code=null; S.room=null; netStatus("");
+  show("lobby"); $("#match").hidden=true; $("#inviteBox").hidden=true; $("#leaveConfirm").hidden=true;
+  history.replaceState(null,"",location.pathname+location.search);
+  renderResume();
+}
+
+$("#leaveBtn").addEventListener("click",()=>{
+  if(NET.isHost){ $("#leaveConfirm").hidden=false; return; }
+  try{ NET.hostConn?.open && NET.hostConn.send({t:"leave",id:uid}); }catch(e){}
+  const code=S.code; store.del("mine:"+code); store.del("lastRoom");
+  setTimeout(()=>exitRoom(),150); toast(`Has salido de la sala ${code}.`);
+});
+$("#leaveNo").addEventListener("click",()=>{ $("#leaveConfirm").hidden=true; });
+$("#leaveYes").addEventListener("click",()=>{
+  const code=S.code; store.del("host:"+code); store.del("hosting"); store.del("lastRoom");
+  exitRoom(); toast(`Has cerrado la sala ${code}.`);
+});
+$("#copyBtn").addEventListener("click",async()=>{
+  const link=`${location.origin}${location.pathname}#${S.code}`;
+  const text=`¡Vamos a decidir a qué jugamos! Entra en la sala ${S.code}: ${link}`;
+  $("#inviteBox").hidden=false; $("#inviteLink").value=link;
+  try{ await navigator.clipboard.writeText(text); $("#inviteMsg").textContent="Invitación copiada. Pégala en vuestro chat. No hace falta cuenta para entrar."; }
+  catch(e){ $("#inviteMsg").textContent="No se pudo copiar automáticamente. Selecciona el enlace y cópialo."; $("#inviteLink").focus(); $("#inviteLink").select(); }
+});
+$("#inviteClose").addEventListener("click",()=>{ $("#inviteBox").hidden=true; });
+$("#inviteLink").addEventListener("focus",e=>e.target.select());
+
+/* ---------- Temáticas ---------- */
+let draftThemes=new Set();
+function openPicker(){
+  draftThemes=new Set(S.mine.themes||[]);
+  const pool=roomPool(S.room?.filters);
+  const counts={}; pool.forEach(g=>g.themes.forEach(t=>counts[t]=(counts[t]||0)+1));
+  $("#themeList").innerHTML=THEMES.filter(t=>counts[t.key]).map(t=>
+    `<button class="theme" data-k="${t.key}" aria-pressed="${draftThemes.has(t.key)}">${esc(t.label)}<span class="n">${counts[t.key]}</span></button>`).join("");
+  $("#themeList").querySelectorAll(".theme").forEach(b=>b.addEventListener("click",()=>{
+    const k=b.dataset.k; draftThemes.has(k)?draftThemes.delete(k):draftThemes.add(k); b.setAttribute("aria-pressed",draftThemes.has(k));
+  }));
+  $("#themeSave").textContent=S.mine.themesSet?"Guardar temáticas":"Empezar a votar";
+  show("picker");
+}
+$("#themeClear").addEventListener("click",()=>{ draftThemes.clear(); saveThemes(); });
+$("#themeSave").addEventListener("click",saveThemes);
+function saveThemes(){ S.mine.themes=[...draftThemes]; S.mine.themesSet=true; S.topId=null; show("room"); saveMine(); render(); }
+
+/* ---------- Recuento y mazo ---------- */
+function tally(){
+  const r=S.room, members=[];
+  const all={...S.votes, [uid]:{...(S.votes[uid]||{joinedAt:Date.now()}), online:true}};
+  for(const [id,v] of Object.entries(all)){
+    const me=id===uid, src=me?S.mine:v, cur=src.round===r.round;
+    members.push({ id, me, name:(me?S.nick:v.name)||"Alguien", joinedAt:v.joinedAt||0, online:me||v.online!==false, likes:cur?(src.likes||[]):[], nopes:cur?(src.nopes||[]):[] });
+  }
+  members.sort((a,b)=>a.joinedAt-b.joinedAt);
+  const online=members.filter(m=>m.online);
+  const nope=new Set(), likes={}, likesOn={};
+  members.forEach(m=>{ m.nopes.forEach(id=>nope.add(id)); m.likes.forEach(id=>{ likes[id]=(likes[id]||0)+1; if(m.online) likesOn[id]=(likesOn[id]||0)+1; }); });
+  const pool=roomPool(r.filters);
+  const alive=pool.filter(g=>!nope.has(g.id));
+  const matches = online.length>=2 ? alive.filter(g=>likesOn[g.id]===online.length).map(g=>g.id) : [];
+  // Mazo personal: primero lo que ya gusta a otros, luego mis temáticas, luego el resto.
+  const voted=new Set([...S.mine.likes,...S.mine.nopes]);
+  const left=alive.filter(g=>!voted.has(g.id));
+  const proposals=left.filter(g=>likes[g.id]).sort((a,b)=>likes[b.id]-likes[a.id]||a.pop-b.pop);
+  const rand=rng(hash(uid+"|"+r.round+"|"+S.code));
+  const weight=new Map(left.map(g=>[g.id, Math.log(2+CATALOG.length-g.pop)+rand()*2.2]));
+  const byWeight=(a,b)=>weight.get(b.id)-weight.get(a.id);
+  const mineT=new Set(S.mine.themes);
+  const fits=g=>!mineT.size||g.themes.some(t=>mineT.has(t));
+  const personal=left.filter(g=>!likes[g.id]&&fits(g)).sort(byWeight);
+  const rest=left.filter(g=>!likes[g.id]&&!fits(g)).sort(byWeight);
+  return { members, online, likes, alive, matches, queue:[...proposals,...personal,...rest].map(g=>g.id), nopeCount:nope.size, personalLeft:personal.length+proposals.length };
+}
+
+function dot(m){ return `<span class="dot" style="background:hsl(${hash(m.id)%360} 75% 68%)">${esc(m.name.slice(0,1).toUpperCase())}</span>`; }
+
+function render(){
+  if(!S.room||!S.mine||$("#room").hidden) return;
+  const t=tally();
+  $("#members").innerHTML=t.members.map(m=>`<span class="chip ${m.online?"":"off"}" title="${m.online?"":"Desconectado"}">${dot(m)}${esc(m.name)}${m.me?" (tú)":""} <span class="prog">${m.online?`${m.likes.length+m.nopes.length} votos`:"desconectado"}</span></span>`).join("");
+  const nT=S.mine.themes.length;
+  $("#stats").innerHTML=`<span>Ronda <b>${S.room.round}</b></span><span><b>${t.alive.length}</b> en juego</span><span><b>${t.nopeCount}</b> descartados</span><button class="link" id="themesBtn">${nT?`Mis temáticas (${nT})`:"Elegir temáticas"}</button>`;
+  $("#themesBtn").onclick=openPicker;
+
+  const newMatch=t.matches.find(id=>!S.dismissed.has(id));
+  if(newMatch) showMatch(newMatch,t); else $("#match").hidden=true;
+
+  renderRank(t);
+  const play=$("#play");
+  if(t.queue.length){
+    const top=t.queue[0];
+    if(S.topId===top&&play.querySelector(".card.top")){ updateLikedBy(t); return; }
+    S.topId=top;
+    const next=t.queue[1];
+    play.innerHTML=`
+      <div class="stage">
+        ${next?cardHTML(BY_ID[next],"behind",t):""}
+        ${cardHTML(BY_ID[top],"top",t)}
+      </div>
+      <div class="actions" style="margin-top:14px">
+        <button class="round no" id="noBtn" aria-label="No me apetece">✕</button>
+        <button class="round yes" id="yesBtn" aria-label="Sí, me apetece">✓</button>
+      </div>
+      <div class="hint" style="margin-top:8px">${t.personalLeft?"Arrastra la carta o usa las flechas ← →":"Ya no quedan juegos de tus temáticas: ahora ves el resto del catálogo."}</div>`;
+    updateLikedBy(t); bindSwipe(); return;
+  }
+  S.topId=null;
+  play.innerHTML=`<div class="panel" style="text-align:center;align-items:center"><h2>Has votado todo el catálogo</h2><p class="muted">Espera a que tus amigos terminen o empezad una ronda nueva desde el ranking.</p></div>`;
+}
+
+function renderRank(t){
+  const n=t.online.length;
+  const top=t.alive.filter(g=>t.likes[g.id]).sort((a,b)=>t.likes[b.id]-t.likes[a.id]||a.pop-b.pop).slice(0,5);
+  const rows=top.length?top.map(g=>`<div class="rank-row"><span>${esc(g.name)}</span><span class="num">${t.likes[g.id]}/${n}</span><span class="bar"><i style="width:${Math.min(100,Math.round(t.likes[g.id]/n*100))}%"></i></span></div>`).join("")
+    :`<p class="muted small">Aún no hay votos a favor. Los juegos que gusten aparecerán aquí.</p>`;
+  const reset=S.confirmReset
+    ?`<div class="confirm"><span>¿Borrar los votos de todos y empezar otra ronda?</span><button id="resetYes">Sí, empezar de nuevo</button><button class="link" id="resetNo">Cancelar</button></div>`
+    :`<button class="link" id="resetBtn" style="align-self:flex-start">Empezar una ronda nueva</button>`;
+  $("#rankPanel").innerHTML=`<span class="label">Lo que más gusta</span><div class="rank">${rows}</div>${n<2?`<p class="muted small">Estás solo en la sala. Pulsa «Invitar» y pasa el enlace a tus amigos.</p>`:""}${reset}`;
+  $("#resetBtn")?.addEventListener("click",()=>{ S.confirmReset=true; renderRank(t); });
+  $("#resetNo")?.addEventListener("click",()=>{ S.confirmReset=false; renderRank(t); });
+  $("#resetYes")?.addEventListener("click",()=>{
+    S.confirmReset=false;
+    if(NET.isHost) hostNewRound();
+    else { try{ NET.hostConn.send({t:"round",id:uid}); }catch(e){ toast("No hay conexión con el anfitrión."); } }
+    toast("Nueva ronda: todos los votos a cero.");
+  });
+}
+
+function updateLikedBy(t){
+  const card=document.querySelector(".card.top"); if(!card) return;
+  const id=+card.dataset.id, el=card.querySelector(".likedby");
+  const who=t.members.filter(m=>!m.me&&m.likes.includes(id)).map(m=>m.name);
+  el.textContent=who.length?`A ${who.join(", ")} le${who.length>1?"s":""} apetece`:"";
+}
+
+function cardHTML(g,cls,t){
+  const h=hash(g.name)%360;
+  const mineT=new Set(S.mine?.themes||[]);
+  const tl=g.themes.map(k=>THEMES.find(x=>x.key===k)).filter(Boolean).sort((a,b)=>mineT.has(b.key)-mineT.has(a.key)).slice(0,3);
+  const proposed=t&&t.likes[g.id]&&cls!=="";
+  return `<article class="card ${cls}" data-id="${g.id}">
+    <div class="cover" style="background:linear-gradient(160deg,hsl(${h} 60% 40%),hsl(${h} 50% 16%))">
+      <span class="fallback">${esc(g.name)}</span>
+      <img src="https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${g.id}/header.jpg" alt="" draggable="false" loading="lazy" style="position:relative" onerror="this.remove()">
+      ${proposed?`<span class="proposal">Propuesto en la sala</span>`:""}
+    </div>
+    <div class="info">
+      <h3>${esc(g.name)}</h3>
+      ${g.genre?`<div class="genre">${esc(g.genre)}</div>`:""}
+      <div class="badges">
+        <span class="badge">${MODE_LABEL[g.mode]}</span>
+        <span class="badge ${g.free?"free":""}">${esc(g.price||"De pago")}</span>
+        <span class="badge" title="Reseñas positivas en Steam">👍 ${g.score}%</span>
+        ${tl.map(x=>`<span class="badge ${mineT.has(x.key)?"mine":""}">${esc(x.label)}</span>`).join("")}
+      </div>
+      <p class="desc">${esc(g.desc)}</p>
+      <div class="card-foot"><span class="likedby"></span><a class="steam" href="https://store.steampowered.com/app/${g.id}/" target="_blank" rel="noopener">Ver en Steam ↗</a></div>
+    </div>
+    <span class="stamp yes">SÍ</span><span class="stamp no">NO</span>
+  </article>`;
+}
+
+function vote(id,yes){
+  if(S.mine.likes.includes(id)||S.mine.nopes.includes(id)) return;
+  (yes?S.mine.likes:S.mine.nopes).push(id);
+  saveMine(); render();
+}
+function flyOut(card,yes){
+  const id=+card.dataset.id;
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches){ vote(id,yes); return; }
+  card.style.transition="transform .28s ease-in, opacity .28s";
+  card.style.transform=`translateX(${yes?520:-520}px) rotate(${yes?24:-24}deg)`;
+  card.style.opacity="0";
+  card.querySelector(".stamp."+(yes?"yes":"no")).style.opacity=1;
+  setTimeout(()=>vote(id,yes),240);
+}
+function bindSwipe(){
+  const card=document.querySelector(".card.top"); if(!card) return;
+  const yesS=card.querySelector(".stamp.yes"), noS=card.querySelector(".stamp.no");
+  let x0=null, dx=0, busy=false;
+  card.addEventListener("pointerdown",e=>{ if(e.target.closest("a")) return; x0=e.clientX; dx=0; card.setPointerCapture(e.pointerId); card.style.transition="none"; });
+  card.addEventListener("pointermove",e=>{ if(x0===null) return; dx=e.clientX-x0;
+    card.style.transform=`translateX(${dx}px) rotate(${dx/18}deg)`;
+    yesS.style.opacity=Math.max(0,Math.min(1,dx/110)); noS.style.opacity=Math.max(0,Math.min(1,-dx/110)); });
+  const end=()=>{ if(x0===null) return; x0=null;
+    if(Math.abs(dx)>110&&!busy){ busy=true; flyOut(card,dx>0); return; }
+    card.style.transition="transform .2s"; card.style.transform=""; yesS.style.opacity=0; noS.style.opacity=0; };
+  card.addEventListener("pointerup",end); card.addEventListener("pointercancel",end);
+  $("#yesBtn").onclick=()=>{ if(!busy){ busy=true; flyOut(card,true); } };
+  $("#noBtn").onclick=()=>{ if(!busy){ busy=true; flyOut(card,false); } };
+}
+document.addEventListener("keydown",e=>{
+  if($("#room").hidden||!$("#match").hidden||/INPUT|SELECT/.test(document.activeElement?.tagName)) return;
+  if(e.key==="ArrowRight") $("#yesBtn")?.click();
+  if(e.key==="ArrowLeft") $("#noBtn")?.click();
+});
+
+function showMatch(id,t){
+  const g=BY_ID[id], m=$("#match");
+  if(!m.hidden&&m.dataset.id==String(id)) return;
+  m.dataset.id=id;
+  m.innerHTML=`<div class="match-box" role="dialog" aria-label="Match">
+    <div class="big">¡MATCH!</div>
+    <p>A los ${t.online.length} os apetece jugar a esto:</p>
+    ${cardHTML(g,"",t)}
+    <div class="btns">
+      <a class="primary-link" href="https://store.steampowered.com/app/${g.id}/" target="_blank" rel="noopener">Abrir en Steam ↗</a>
+      <button id="mKeep">Seguir buscando otros</button>
+    </div>
+  </div>`;
+  m.hidden=false;
+  $("#mKeep").onclick=()=>{ S.dismissed.add(id); m.hidden=true; render(); };
+}
+
+/* ---------- Arranque ---------- */
+(async()=>{
+  try{ await loadCatalog(); }
+  catch(e){ $("#catInfo").textContent="No se pudo cargar el catálogo de juegos. Recarga la página."; return; }
+  updateCount();
+  renderResume();
+  if(/^[A-Z]{4}$/.test(hashCode)){
+    if($("#nick").value.trim()) joinCode(hashCode);
+    else { $("#joinErr").textContent=`Te han invitado a la sala ${hashCode}. Escribe tu apodo arriba y pulsa Entrar.`; $("#nick").focus(); }
+  }
+})();
+</script>
+</body>
+</html>
