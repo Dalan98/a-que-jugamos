@@ -1,7 +1,9 @@
-"""Regenera games.json a partir de la API de Steam y de SteamSpy.
+"""Actualiza games.json con la API de Steam (y SteamSpy en el modo completo).
 
-Lo ejecuta a diario la GitHub Action .github/workflows/update-catalog.yml.
-Solo usa la librería estándar. Uso local: python scripts/update_catalog.py
+Lo lanza a mano la GitHub Action .github/workflows/update-catalog.yml.
+Solo usa la librería estándar. Uso local:
+  python scripts/update_catalog.py precios    # ~1 min: precios y ofertas del catálogo actual
+  python scripts/update_catalog.py completo   # ~20 min: juegos nuevos, reseñas, etiquetas y precios
 """
 import html, json, os, re, sys, threading, time, urllib.request, urllib.parse
 
@@ -68,7 +70,42 @@ def clean(s):
     return s if len(s) <= 260 else s[:257].rsplit(" ", 1)[0] + "…"
 
 
+def format_price(is_free, po):
+    if is_free:
+        return "Gratis"
+    if po.get("discount_percent"):
+        return f"{po.get('final_formatted', '')} (-{po['discount_percent']}%)"
+    return po.get("final_formatted", "")
+
+
+def update_prices():
+    with open(OUT, encoding="utf-8") as f:
+        cat = json.load(f)
+    games, changed = cat["games"], 0
+    for i in range(0, len(games), 50):
+        batch = games[i:i + 50]
+        ids = ",".join(str(g[0]) for g in batch)
+        d = get_json(f"https://store.steampowered.com/api/appdetails?appids={ids}&cc=es&filters=price_overview") or {}
+        for g in batch:
+            info = d.get(str(g[0])) or {}
+            data = info.get("data")
+            if not info.get("success") or g[5]:  # sin datos o juego gratuito: se deja como estaba
+                continue
+            po = data.get("price_overview") if isinstance(data, dict) else None
+            if po:
+                price = format_price(False, po)
+                if price and price != g[6]:
+                    g[6], changed = price, changed + 1
+        time.sleep(1.5)
+    cat["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump(cat, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"precios cambiados: {changed} de {len(games)}")
+
+
 def main():
+    if (sys.argv[1:] or ["precios"])[0] == "precios":
+        return update_prices()
     pool = {}
     for tag in MULTI_TAGS:
         d = get_json("https://steamspy.com/api.php?request=tag&tag=" + urllib.parse.quote(tag))
@@ -125,12 +162,7 @@ def main():
         coop, pvp = bool(cats & COOP), bool(cats & PVP)
         mode = "a" if coop and pvp else "c" if coop else "p" if pvp else "a"
         themes = [i for i, (_, _, ts) in enumerate(THEMES) if set(ts) & set(top[:15])]
-        if d.get("is_free"):
-            price = "Gratis"
-        elif po.get("discount_percent"):
-            price = f"{po.get('final_formatted', '')} (-{po['discount_percent']}%)"
-        else:
-            price = po.get("final_formatted", "")
+        price = format_price(d.get("is_free"), po)
         pos, neg = sp["positive"], sp["negative"]
         games.append([appid, d["name"].strip(), clean(d.get("short_description")), themes, mode,
                       1 if d.get("is_free") else 0, price, round(100 * pos / (pos + neg)), pos + neg,
@@ -143,7 +175,7 @@ def main():
         print("Demasiado pocos juegos: probablemente la API ha fallado. No se toca games.json.")
         sys.exit(1)
     with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"themes": [[k, label] for k, label, _ in THEMES], "updated": time.strftime("%Y-%m-%d"),
+        json.dump({"themes": [[k, label] for k, label, _ in THEMES], "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "games": games}, f, ensure_ascii=False, separators=(",", ":"))
 
 

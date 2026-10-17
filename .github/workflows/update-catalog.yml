@@ -1,11 +1,17 @@
 name: Actualizar catálogo y publicar
 
+# Solo se ejecuta a mano (botón «Run workflow» o el botón del anfitrión en la app)
+# y al subir cambios al código. No hay ejecuciones programadas.
 on:
   push:
     branches: [main]
-  schedule:
-    - cron: "0 5 * * *"   # cada día a las 05:00 UTC
   workflow_dispatch:
+    inputs:
+      modo:
+        description: "precios = ~1 min, solo precios y ofertas · completo = ~20 min, también juegos nuevos y reseñas"
+        type: choice
+        options: [precios, completo]
+        default: precios
 
 permissions:
   contents: write
@@ -31,17 +37,17 @@ jobs:
           python-version: "3.12"
 
       - name: Consultar la API de Steam
-        if: github.event_name != 'push'
+        if: github.event_name == 'workflow_dispatch'
         continue-on-error: true   # si Steam falla, se publica el catálogo anterior
-        run: python scripts/update_catalog.py
+        run: python scripts/update_catalog.py ${{ inputs.modo }}
 
       - name: Guardar el catálogo nuevo
-        if: github.event_name != 'push'
+        if: github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add games.json
-          git diff --cached --quiet || (git commit -m "Actualizar catálogo de Steam" && git push)
+          git diff --cached --quiet || (git commit -m "Actualizar catálogo de Steam (${{ inputs.modo }})" && git push)
 
       - uses: actions/configure-pages@v5
 

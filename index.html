@@ -217,6 +217,14 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
     <div class="stats" id="stats"></div>
     <div id="play"></div>
     <div class="panel" id="rankPanel"></div>
+    <div class="panel" id="hostTools" hidden>
+      <span class="label">Catálogo de Steam</span>
+      <p class="small muted" id="catDate"></p>
+      <a class="primary-link" id="updateLink" href="https://github.com/Dalan98/a-que-jugamos/actions/workflows/update-catalog.yml" target="_blank" rel="noopener" style="text-align:center">Actualizar catálogo de Steam ↗</a>
+      <p class="small muted">Se abre GitHub: pulsa «Run workflow» y elige <b>precios</b> (≈1 min, precios y ofertas) o <b>completo</b> (≈20 min, también juegos nuevos y reseñas). Solo funciona con la cuenta de GitHub dueña de la web.</p>
+      <p class="small" id="updateStatus" hidden></p>
+      <button class="link" id="checkCatalog" style="align-self:flex-start">Comprobar si ya hay catálogo nuevo</button>
+    </div>
   </section>
 </div>
 <div class="match" id="match" hidden></div>
@@ -241,18 +249,51 @@ const MODE_LABEL = {c:"Cooperativo",p:"Competitivo",a:"Coop y competitivo",any:"
 const PREFIX = "aqj-steam-v1-";
 
 /* ---------- Catálogo: games.json, que una GitHub Action regenera a diario desde la API de Steam ---------- */
-let THEMES=[], CATALOG=[], BY_ID={};
-async function loadCatalog(){
-  $("#catInfo").textContent="Cargando catálogo de Steam…";
-  const r=await fetch("games.json",{cache:"no-cache"});
+let THEMES=[], CATALOG=[], BY_ID={}, CAT_VERSION="";
+function fmtDate(s){
+  const d=new Date(s), hasTime=/T/.test(s);
+  return d.toLocaleString("es-ES",hasTime?{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"}:{day:"numeric",month:"long",year:"numeric"});
+}
+async function fetchCatalog(){
+  const r=await fetch("games.json?t="+Date.now(),{cache:"no-store"});
   if(!r.ok) throw new Error(r.status);
-  const CAT=await r.json();
+  return r.json();
+}
+async function loadCatalog(CAT){
+  if(!CAT){ $("#catInfo").textContent="Cargando catálogo de Steam…"; CAT=await fetchCatalog(); }
+  CAT_VERSION=CAT.updated;
   THEMES=CAT.themes.map(([key,label])=>({key,label}));
   CATALOG=CAT.games.map(([id,name,desc,t,m,f,p,r,n,g],idx)=>({id,name,desc,themes:t.map(x=>THEMES[x].key),mode:m,free:!!f,price:p,score:r,reviews:n,genre:g,pop:idx}));
   BY_ID=Object.fromEntries(CATALOG.map(g=>[g.id,g]));
-  const when=new Date(CAT.updated).toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"});
-  $("#catInfo").textContent=`${CATALOG.length} juegos multijugador de Steam con buenas reseñas · precios y reseñas de Steam actualizados el ${when}.`;
+  $("#catInfo").textContent=`${CATALOG.length} juegos multijugador de Steam con buenas reseñas · datos de Steam actualizados el ${fmtDate(CAT.updated)}.`;
+  $("#catDate").textContent=`${CATALOG.length} juegos · actualizado el ${fmtDate(CAT.updated)}.`;
 }
+
+/* El anfitrión lanza la actualización en GitHub y la app espera al catálogo nuevo */
+let pollT=null, pollUntil=0;
+async function checkNewCatalog(manual){
+  const st=$("#updateStatus");
+  try{
+    const CAT=await fetchCatalog();
+    if(CAT.updated!==CAT_VERSION){
+      await loadCatalog(CAT); stopPolling();
+      st.hidden=false; st.textContent=`Catálogo nuevo cargado: ${CATALOG.length} juegos. Ya lo ven todos en la sala.`;
+      S.topId=null; if(NET.isHost) hostBroadcast(); else render();
+      return true;
+    }
+    if(manual){ st.hidden=false; st.textContent="Todavía no hay catálogo nuevo. Si ya lo lanzaste en GitHub, espera a que termine; la app lo comprobará sola."; }
+  }catch(e){ if(manual){ st.hidden=false; st.textContent="No se pudo comprobar el catálogo. Revisa tu conexión."; } }
+  return false;
+}
+function startPolling(){
+  pollUntil=Date.now()+30*60*1000;
+  const st=$("#updateStatus"); st.hidden=false; st.textContent="Esperando el catálogo nuevo… La app lo cargará sola en cuanto GitHub termine.";
+  clearInterval(pollT);
+  pollT=setInterval(()=>{ if(Date.now()>pollUntil){ stopPolling(); $("#updateStatus").textContent="Se dejó de esperar. Pulsa «Comprobar» cuando termine en GitHub."; return; } checkNewCatalog(false); },30000);
+}
+function stopPolling(){ clearInterval(pollT); pollT=null; }
+$("#updateLink").addEventListener("click",startPolling);
+$("#checkCatalog").addEventListener("click",()=>checkNewCatalog(true));
 function roomPool(f){ f=f||{mode:"any",free:false}; return CATALOG.filter(g=>(f.mode==="any"||!f.mode||g.mode===f.mode||g.mode==="a") && (!f.free||g.free)); }
 
 /* ---------- Identidad local (sin cuentas) ---------- */
@@ -395,6 +436,7 @@ let bcT=null;
 function hostBroadcast(){
   const H=NET.H; if(!H) return;
   H.members[uid]={...H.members[uid], ...S.mine, likes:[...S.mine.likes], nopes:[...S.mine.nopes], name:S.nick, online:true};
+  H.catalog=CAT_VERSION; // los invitados recargan el catálogo si cambia
   store.set("host:"+H.code, JSON.stringify(H));
   applyState(H);
   clearTimeout(bcT);
@@ -438,7 +480,13 @@ function resetSession(code,nick){
 }
 function teardown(){ clearTimeout(NET.retryT); if(NET.peer){ NET.leaving=true; try{ NET.peer.destroy(); }catch(e){} NET.peer=null; } }
 
+let catSyncing=false;
 function applyState(st){
+  if(!NET.isHost && st.catalog && st.catalog!==CAT_VERSION && !catSyncing){
+    catSyncing=true;
+    fetchCatalog().then(c=>{ if(c.updated!==CAT_VERSION){ loadCatalog(c); S.topId=null; toast(`El anfitrión ha actualizado el catálogo de Steam: ${CATALOG.length} juegos.`); render(); } })
+      .catch(()=>{}).finally(()=>{ catSyncing=false; });
+  }
   S.room={ code:st.code, round:st.round, filters:st.filters };
   S.votes=st.members||{};
   const rec=S.votes[uid];
@@ -454,6 +502,7 @@ function applyState(st){
 function enterRoomUI(){
   store.set("lastRoom",S.code);
   $("#roleLabel").textContent = NET.isHost ? "Tu sala (eres el anfitrión)" : "Código de la sala";
+  $("#hostTools").hidden = !NET.isHost;
   if(S.mine.themesSet) show("room"); else openPicker();
   render();
 }

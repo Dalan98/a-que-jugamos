@@ -3,8 +3,11 @@
 Web para decidir entre amigos a qué juego de Steam jugar, deslizando cartas al estilo Tinder.
 
 - **Sin cuentas ni servidor propio:** el navegador de quien crea la sala guarda la partida y los demás se conectan a él directamente (WebRTC con [PeerJS](https://peerjs.com/)).
-- **Catálogo de Steam actualizado a diario:** la API de Steam no se puede consultar desde el navegador (no permite CORS). Por eso la GitHub Action `.github/workflows/update-catalog.yml` ejecuta cada día `scripts/update_catalog.py`. El script consulta la tienda de Steam y SteamSpy, regenera `games.json` (precios, ofertas, reseñas y etiquetas) y vuelve a publicar la web en GitHub Pages.
-- Para forzar una actualización: pestaña **Actions** → «Actualizar catálogo y publicar» → **Run workflow**.
+- **Catálogo de Steam bajo demanda:** la API de Steam no se puede consultar desde el navegador (no permite CORS). Por eso la GitHub Action `.github/workflows/update-catalog.yml` ejecuta `scripts/update_catalog.py`, que regenera `games.json` y vuelve a publicar la web. Solo se lanza a mano, nunca de forma programada:
+  - desde la app: el anfitrión pulsa «Actualizar catálogo de Steam» en su sala (se abre GitHub) y la app carga el catálogo nuevo en cuanto está listo, también para los invitados;
+  - o en la pestaña **Actions** → «Actualizar catálogo y publicar» → **Run workflow**.
+  - Modo `precios` (≈1 min): precios y ofertas. Modo `completo` (≈20 min): también juegos nuevos, reseñas y etiquetas.
+  - Solo puede lanzarlo una cuenta con permiso de escritura en el repositorio.
 
 ## Cómo se juega
 
