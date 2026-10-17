@@ -1,9 +1,13 @@
-"""Actualiza games.json con la API de Steam (y SteamSpy en el modo completo).
+"""Actualiza games.json con la API de Steam, SteamSpy y PCGamingWiki.
 
 Lo lanza a mano la GitHub Action .github/workflows/update-catalog.yml.
 Solo usa la librería estándar. Uso local:
   python scripts/update_catalog.py precios    # ~1 min: precios y ofertas del catálogo actual
-  python scripts/update_catalog.py completo   # ~20 min: juegos nuevos, reseñas, etiquetas y precios
+  python scripts/update_catalog.py jugadores  # ~5 min: nº máximo de jugadores (PCGamingWiki) de los juegos que no lo tienen
+  python scripts/update_catalog.py completo   # ~25 min: juegos nuevos, reseñas, etiquetas, precios y jugadores
+
+Formato de cada juego en games.json:
+  [appid, nombre, descripción, temáticas, modo, gratis, precio, % positivas, nº reseñas, géneros, máx. jugadores (0 = sin dato)]
 """
 import html, json, os, re, sys, threading, time, urllib.request, urllib.parse
 
@@ -78,9 +82,80 @@ def format_price(is_free, po):
     return po.get("final_formatted", "")
 
 
-def update_prices():
+PCGW = "https://www.pcgamingwiki.com"
+PLAYER_FIELDS = re.compile(r"^\|\s*(?:online|lan|local) play (?:players|notes)\s*=\s*(.*)$", re.M)
+# Frases inequívocas en la descripción de Steam («hasta 4 jugadores», «up to 8 players», «4-player co-op»).
+DESC_PLAYERS = [re.compile(r"(?:hasta|up to)\s*(\d{1,3})\s*(?:jugadores|players|personas|amigos|friends)"),
+                re.compile(r"(\d{1,2})[- ](?:player|jugadores)\s*(?:co-?op|cooperativ)")]
+
+
+def wiki_players(page):
+    d = get_json(f"{PCGW}/w/api.php?action=parse&prop=wikitext&format=json&formatversion=2&redirects=1&page="
+                 + urllib.parse.quote(page), tries=2)
+    wikitext = ((d or {}).get("parse") or {}).get("wikitext", "")
+    nums = [int(n) for v in PLAYER_FIELDS.findall(wikitext) for n in re.findall(r"\d+", v.split("<")[0])]
+    nums = [n for n in nums if 1 < n <= 1000]
+    return max(nums) if nums else 0
+
+
+def max_players(appid, name, description=""):
+    """Máximo de jugadores (online, LAN o local). Busca en PCGamingWiki por ID de Steam y, si el ID es ambiguo
+    o la ficha está vacía, por nombre; como último recurso, en la descripción de Steam. 0 si no hay dato."""
+    try:
+        req = urllib.request.Request(f"{PCGW}/api/appid.php?appid={appid}", method="HEAD",
+                                     headers={"User-Agent": "a-que-jugamos-catalog/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            url = r.geturl()
+    except Exception:
+        url = ""
+    n = 0
+    if "/wiki/" in url:
+        n = wiki_players(urllib.parse.unquote(url.rsplit("/wiki/", 1)[1]).replace("_", " "))
+    if not n:
+        time.sleep(0.3)
+        n = wiki_players(re.sub(r"[™®©]", "", name).strip())
+    if not n and description:
+        text = html.unescape(re.sub(r"<[^>]+>", " ", description)).lower()
+        found = [int(m.group(1)) for p in DESC_PLAYERS for m in p.finditer(text)]
+        found = [x for x in found if 2 <= x <= 100]
+        n = max(found) if found else 0
+    return n
+
+
+def fill_players(games, known, descriptions=None):
+    """Pone el nº de jugadores (posición 10) reutilizando los ya conocidos y consultando solo los que faltan."""
+    missing = 0
+    for g in games:
+        while len(g) < 11:
+            g.append(0)
+        if known.get(g[0]):
+            g[10] = known[g[0]]
+            continue
+        g[10] = max_players(g[0], g[1], (descriptions or {}).get(g[0], ""))
+        missing += 1
+        time.sleep(0.4)
+    print(f"jugadores consultados: {missing} · con dato: {sum(1 for g in games if g[10])} de {len(games)}", flush=True)
+
+
+def load_catalog():
     with open(OUT, encoding="utf-8") as f:
-        cat = json.load(f)
+        return json.load(f)
+
+
+def save_catalog(cat):
+    cat["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump(cat, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def update_players():
+    cat = load_catalog()
+    fill_players(cat["games"], {g[0]: g[10] for g in cat["games"] if len(g) > 10 and g[10]})
+    save_catalog(cat)
+
+
+def update_prices():
+    cat = load_catalog()
     games, changed = cat["games"], 0
     for i in range(0, len(games), 50):
         batch = games[i:i + 50]
@@ -97,15 +172,16 @@ def update_prices():
                 if price and price != g[6]:
                     g[6], changed = price, changed + 1
         time.sleep(1.5)
-    cat["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(cat, f, ensure_ascii=False, separators=(",", ":"))
+    save_catalog(cat)
     print(f"precios cambiados: {changed} de {len(games)}")
 
 
 def main():
-    if (sys.argv[1:] or ["precios"])[0] == "precios":
+    mode = (sys.argv[1:] or ["precios"])[0]
+    if mode == "precios":
         return update_prices()
+    if mode == "jugadores":
+        return update_players()
     pool = {}
     for tag in MULTI_TAGS:
         d = get_json("https://steamspy.com/api.php?request=tag&tag=" + urllib.parse.quote(tag))
@@ -174,9 +250,13 @@ def main():
     if len(games) < MIN_GAMES:
         print("Demasiado pocos juegos: probablemente la API ha fallado. No se toca games.json.")
         sys.exit(1)
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"themes": [[k, label] for k, label, _ in THEMES], "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                   "games": games}, f, ensure_ascii=False, separators=(",", ":"))
+    try:  # el nº de jugadores casi nunca cambia: se reutiliza y solo se consultan los juegos nuevos
+        known = {g[0]: g[10] for g in load_catalog()["games"] if len(g) > 10 and g[10]}
+    except Exception:
+        known = {}
+    descriptions = {a: (s or {}).get("data", {}).get("detailed_description", "") for a, s in store.items() if s}
+    fill_players(games, known, descriptions)
+    save_catalog({"themes": [[k, label] for k, label, _ in THEMES], "games": games})
 
 
 if __name__ == "__main__":

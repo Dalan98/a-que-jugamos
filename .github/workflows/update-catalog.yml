@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       modo:
-        description: "precios = ~1 min, solo precios y ofertas · completo = ~20 min, también juegos nuevos y reseñas"
+        description: "precios = ~1 min, precios y ofertas · jugadores = ~5 min, nº de jugadores que falten · completo = ~25 min, todo (juegos nuevos, reseñas, jugadores…)"
         type: choice
-        options: [precios, completo]
+        options: [precios, jugadores, completo]
         default: precios
 
 permissions:

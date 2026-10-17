@@ -6,12 +6,13 @@ Web para decidir entre amigos a qué juego de Steam jugar, deslizando cartas al 
 - **Catálogo de Steam bajo demanda:** la API de Steam no se puede consultar desde el navegador (no permite CORS). Por eso la GitHub Action `.github/workflows/update-catalog.yml` ejecuta `scripts/update_catalog.py`, que regenera `games.json` y vuelve a publicar la web. Solo se lanza a mano, nunca de forma programada:
   - desde la app: el anfitrión pulsa «Actualizar catálogo de Steam» en su sala (se abre GitHub) y la app carga el catálogo nuevo en cuanto está listo, también para los invitados;
   - o en la pestaña **Actions** → «Actualizar catálogo y publicar» → **Run workflow**.
-  - Modo `precios` (≈1 min): precios y ofertas. Modo `completo` (≈20 min): también juegos nuevos, reseñas y etiquetas.
+  - Modo `precios` (≈1 min): precios y ofertas. Modo `jugadores` (≈5 min): nº máximo de jugadores de los juegos que no lo tienen. Modo `completo` (≈25 min): juegos nuevos, reseñas, etiquetas, precios y jugadores.
+- **Nº de jugadores:** Steam no lo publica, así que se toma de las fichas de [PCGamingWiki](https://www.pcgamingwiki.com/) (máximo entre online, LAN y local), buscando por ID de Steam o por nombre y, en el modo completo, también en frases como «hasta 4 jugadores» de la descripción de Steam. Si la sala es «para 4», solo salen juegos que admiten al menos 4; los que no tienen dato se pueden incluir con una casilla.
   - Solo puede lanzarlo una cuenta con permiso de escritura en el repositorio.
 
 ## Cómo se juega
 
-1. Una persona crea la sala y comparte el enlace de «Invitar».
+1. Una persona crea la sala (eligiendo cuántos sois) y comparte el enlace de «Invitar».
 2. Cada uno elige sus temáticas y desliza: → sí, ← no.
 3. Cada uno vota todos los juegos por su cuenta: un «no» no se los quita a los demás. Lo que gusta a alguien aparece antes en el mazo del resto.
 4. Cuando a todos los conectados les gusta el mismo juego: ¡match!

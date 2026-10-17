@@ -160,6 +160,10 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
       <h2>Crear sala nueva</h2>
       <div class="row">
         <div class="field">
+          <label for="fPlayers">¿Cuántos sois?</label>
+          <select id="fPlayers"></select>
+        </div>
+        <div class="field">
           <label for="fMode">Modo</label>
           <select id="fMode">
             <option value="any">Cualquiera</option>
@@ -167,10 +171,9 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
             <option value="p">Competitivo</option>
           </select>
         </div>
-        <div class="field" style="justify-content:flex-end">
-          <label class="check" for="fFree"><input type="checkbox" id="fFree"> Solo gratuitos</label>
-        </div>
       </div>
+      <label class="check" for="fFree"><input type="checkbox" id="fFree"> Solo gratuitos</label>
+      <label class="check" for="fUnknown"><input type="checkbox" id="fUnknown"> Incluir juegos sin dato de jugadores</label>
       <div class="muted small" id="fCount"></div>
       <p class="muted small">La sala vive en tu navegador: mantén esta página abierta mientras jugáis a decidir.</p>
       <button class="primary" id="createBtn">Crear sala</button>
@@ -218,10 +221,16 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
     <div id="play"></div>
     <div class="panel" id="rankPanel"></div>
     <div class="panel" id="hostTools" hidden>
+      <div class="field">
+        <label for="roomPlayers">¿Cuántos sois? (solo lo cambia el anfitrión)</label>
+        <select id="roomPlayers"></select>
+        <label class="check" for="roomUnknown"><input type="checkbox" id="roomUnknown"> Incluir juegos sin dato de jugadores</label>
+        <p class="small muted" id="roomPlayersInfo"></p>
+      </div>
       <span class="label">Catálogo de Steam</span>
       <p class="small muted" id="catDate"></p>
       <a class="primary-link" id="updateLink" href="https://github.com/Dalan98/a-que-jugamos/actions/workflows/update-catalog.yml" target="_blank" rel="noopener" style="text-align:center">Actualizar catálogo de Steam ↗</a>
-      <p class="small muted">Se abre GitHub: pulsa «Run workflow» y elige <b>precios</b> (≈1 min, precios y ofertas) o <b>completo</b> (≈20 min, también juegos nuevos y reseñas). Solo funciona con la cuenta de GitHub dueña de la web.</p>
+      <p class="small muted">Se abre GitHub: pulsa «Run workflow» y elige <b>precios</b> (≈1 min, precios y ofertas) o <b>completo</b> (≈25 min, también juegos nuevos, reseñas y nº de jugadores). Solo funciona con la cuenta de GitHub dueña de la web.</p>
       <p class="small" id="updateStatus" hidden></p>
       <button class="link" id="checkCatalog" style="align-self:flex-start">Comprobar si ya hay catálogo nuevo</button>
     </div>
@@ -263,7 +272,7 @@ async function loadCatalog(CAT){
   if(!CAT){ $("#catInfo").textContent="Cargando catálogo de Steam…"; CAT=await fetchCatalog(); }
   CAT_VERSION=CAT.updated;
   THEMES=CAT.themes.map(([key,label])=>({key,label}));
-  CATALOG=CAT.games.map(([id,name,desc,t,m,f,p,r,n,g],idx)=>({id,name,desc,themes:t.map(x=>THEMES[x].key),mode:m,free:!!f,price:p,score:r,reviews:n,genre:g,pop:idx}));
+  CATALOG=CAT.games.map(([id,name,desc,t,m,f,p,r,n,g,pl],idx)=>({id,name,desc,themes:t.map(x=>THEMES[x].key),mode:m,free:!!f,price:p,score:r,reviews:n,genre:g,players:+pl||0,pop:idx}));
   BY_ID=Object.fromEntries(CATALOG.map(g=>[g.id,g]));
   $("#catInfo").textContent=`${CATALOG.length} juegos multijugador de Steam con buenas reseñas · datos de Steam actualizados el ${fmtDate(CAT.updated)}.`;
   $("#catDate").textContent=`${CATALOG.length} juegos · actualizado el ${fmtDate(CAT.updated)}.`;
@@ -293,8 +302,23 @@ function startPolling(){
 }
 function stopPolling(){ clearInterval(pollT); pollT=null; }
 $("#updateLink").addEventListener("click",startPolling);
+function hostSetPlayers(){
+  if(!NET.isHost||!NET.H) return;
+  NET.H.filters={...NET.H.filters, players:+$("#roomPlayers").value||0, unknown:$("#roomUnknown").checked};
+  S.topId=null; hostBroadcast();
+  toast(`Ahora salen juegos para ${playersLabel(NET.H.filters.players)}.`);
+}
+$("#roomPlayers").addEventListener("change",hostSetPlayers);
+$("#roomUnknown").addEventListener("change",hostSetPlayers);
 $("#checkCatalog").addEventListener("click",()=>checkNewCatalog(true));
-function roomPool(f){ f=f||{mode:"any",free:false}; return CATALOG.filter(g=>(f.mode==="any"||!f.mode||g.mode===f.mode||g.mode==="a") && (!f.free||g.free)); }
+// players: cuántos sois (0 = da igual). Solo entran los juegos que admiten al menos ese número;
+// los que no tienen dato de jugadores quedan fuera salvo que se marque «unknown».
+function roomPool(f){ f=f||{mode:"any",free:false,players:0}; const n=+f.players||0;
+  return CATALOG.filter(g=>(f.mode==="any"||!f.mode||g.mode===f.mode||g.mode==="a") && (!f.free||g.free)
+    && (!n || g.players>=n || (f.unknown && !g.players))); }
+const PLAYER_OPTIONS=[[0,"Da igual"],[2,"2"],[3,"3"],[4,"4"],[5,"5"],[6,"6"],[8,"7 u 8"],[10,"9 o 10"],[11,"11 o más"]];
+function playersLabel(n){ return n?`${(PLAYER_OPTIONS.find(o=>o[0]===n)||[0,n])[1]} jugadores`:"cualquier nº de jugadores"; }
+function fillPlayerSelect(sel,value){ sel.innerHTML=PLAYER_OPTIONS.map(([v,l])=>`<option value="${v}" ${v===value?"selected":""}>${l}</option>`).join(""); }
 
 /* ---------- Identidad local (sin cuentas) ---------- */
 // Una identidad por pestaña: así dos pestañas del mismo navegador cuentan como dos personas.
@@ -316,11 +340,13 @@ if(/^[A-Z]{4}$/.test(hashCode)) $("#joinCode").value=hashCode;
 
 function updateCount(){
   if(!CATALOG.length){ $("#createBtn").disabled=true; return; }
-  const n=roomPool({mode:$("#fMode").value,free:$("#fFree").checked}).length;
+  const n=roomPool(lobbyFilters()).length;
   $("#fCount").textContent = n ? `${n} juegos encajan con estos filtros.` : "Ningún juego encaja. Prueba a quitar algún filtro.";
   $("#createBtn").disabled=!n;
 }
-["#fMode","#fFree"].forEach(s=>$(s).addEventListener("change",updateCount));
+function lobbyFilters(){ return { mode:$("#fMode").value, free:$("#fFree").checked, players:+$("#fPlayers").value||0, unknown:$("#fUnknown").checked }; }
+fillPlayerSelect($("#fPlayers"), +store.get("players")||4);
+["#fMode","#fFree","#fPlayers","#fUnknown"].forEach(s=>$(s).addEventListener("change",()=>{ store.set("players",$("#fPlayers").value); updateCount(); }));
 updateCount();
 
 function needNick(errEl){
@@ -353,7 +379,7 @@ $("#createBtn").addEventListener("click",()=>{
   const old=store.get("hosting"); if(old) store.del("host:"+old);
   const letters="ABCDEFGHJKLMNPQRSTUVWXYZ";
   const code=Array.from({length:4},()=>letters[Math.floor(Math.random()*letters.length)]).join("");
-  startHost(code,nick,{ code, createdAt:Date.now(), round:1, filters:{mode:$("#fMode").value,free:$("#fFree").checked}, members:{} }, true);
+  startHost(code,nick,{ code, createdAt:Date.now(), round:1, filters:lobbyFilters(), members:{} }, true);
 });
 $("#joinBtn").addEventListener("click",joinFromInput);
 $("#joinCode").addEventListener("keydown",e=>{ if(e.key==="Enter") joinFromInput(); });
@@ -525,7 +551,11 @@ function applyState(st){
     fetchCatalog().then(c=>{ if(c.updated!==CAT_VERSION){ loadCatalog(c); S.topId=null; toast(`El anfitrión ha actualizado el catálogo de Steam: ${CATALOG.length} juegos.`); render(); } })
       .catch(()=>{}).finally(()=>{ catSyncing=false; });
   }
-  S.room={ code:st.code, round:st.round, filters:st.filters };
+  if(S.room && JSON.stringify(S.room.filters)!==JSON.stringify(st.filters)){
+    S.topId=null;
+    if(!NET.isHost) toast(`El anfitrión ha cambiado la sala: juegos para ${playersLabel(+st.filters?.players||0)}.`);
+  }
+  S.room={ code:st.code, round:st.round, filters:{...st.filters} };
   S.votes=st.members||{};
   const rec=S.votes[uid];
   if(!NET.isHost && rec){
@@ -541,6 +571,7 @@ function enterRoomUI(){
   store.set("lastRoom",S.code);
   $("#roleLabel").textContent = NET.isHost ? "Tu sala (eres el anfitrión)" : "Código de la sala";
   $("#hostTools").hidden = !NET.isHost;
+  if(NET.isHost){ fillPlayerSelect($("#roomPlayers"), +NET.H.filters?.players||0); $("#roomUnknown").checked=!!NET.H.filters?.unknown; }
   if(S.mine.themesSet) show("room"); else openPicker();
   render();
 }
@@ -634,8 +665,9 @@ function render(){
   const t=tally();
   $("#members").innerHTML=t.members.map(m=>`<span class="chip ${m.online?"":"off"}" title="${m.online?"":"Desconectado"}">${dot(m)}${esc(m.name)}${m.me?" (tú)":""} <span class="prog">${m.online?`${m.likes.length+m.nopes.length} votos`:"desconectado"}</span></span>`).join("");
   const nT=S.mine.themes.length;
-  $("#stats").innerHTML=`<span>Ronda <b>${S.room.round}</b></span><span><b>${t.alive.length}</b> juegos</span><span>Te quedan <b>${t.queue.length}</b> por votar</span><button class="link" id="themesBtn">${nT?`Mis temáticas (${nT})`:"Elegir temáticas"}</button>`;
+  $("#stats").innerHTML=`<span>Ronda <b>${S.room.round}</b></span><span>Para <b>${playersLabel(+S.room.filters?.players||0)}</b></span><span><b>${t.alive.length}</b> juegos</span><span>Te quedan <b>${t.queue.length}</b> por votar</span><button class="link" id="themesBtn">${nT?`Mis temáticas (${nT})`:"Elegir temáticas"}</button>`;
   $("#themesBtn").onclick=openPicker;
+  if(NET.isHost) $("#roomPlayersInfo").textContent=`${t.alive.length} juegos encajan con los filtros de la sala.`;
 
   const newMatch=t.matches.find(id=>!S.dismissed.has(id));
   if(newMatch) showMatch(newMatch,t); else $("#match").hidden=true;
@@ -705,6 +737,7 @@ function cardHTML(g,cls,t){
       ${g.genre?`<div class="genre">${esc(g.genre)}</div>`:""}
       <div class="badges">
         <span class="badge">${MODE_LABEL[g.mode]}</span>
+        <span class="badge">${g.players?`Hasta ${g.players} jugadores`:"Jugadores: sin dato"}</span>
         <span class="badge ${g.free?"free":""}">${esc(g.price||"De pago")}</span>
         <span class="badge" title="Reseñas positivas en Steam">👍 ${g.score}%</span>
         ${tl.map(x=>`<span class="badge ${mineT.has(x.key)?"mine":""}">${esc(x.label)}</span>`).join("")}
