@@ -2,7 +2,7 @@
 
 Web para decidir entre amigos a qué juego de Steam jugar, deslizando cartas al estilo Tinder.
 
-- **Sin cuentas ni servidor propio:** el navegador de quien crea la sala guarda la partida y los demás se conectan a él directamente (WebRTC con [PeerJS](https://peerjs.com/)).
+- **Sin cuentas ni servidor propio:** el navegador de quien crea la sala guarda la partida. Los mensajes viajan por un servidor MQTT público y gratuito ([EMQX](https://www.emqx.com/en/mqtt/public-mqtt5-broker)) mediante WebSocket seguro, así que funciona detrás de cualquier router o red móvil. Los mensajes (apodos y votos) no van cifrados de extremo a extremo: no compartáis nada privado.
 - **Catálogo de Steam bajo demanda:** la API de Steam no se puede consultar desde el navegador (no permite CORS). Por eso la GitHub Action `.github/workflows/update-catalog.yml` ejecuta `scripts/update_catalog.py`, que regenera `games.json` y vuelve a publicar la web. Solo se lanza a mano, nunca de forma programada:
   - desde la app: el anfitrión pulsa «Actualizar catálogo de Steam» en su sala (se abre GitHub) y la app carga el catálogo nuevo en cuanto está listo, también para los invitados;
   - o en la pestaña **Actions** → «Actualizar catálogo y publicar» → **Run workflow**.

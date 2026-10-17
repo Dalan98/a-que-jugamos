@@ -230,7 +230,7 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
 <div class="match" id="match" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -246,7 +246,7 @@ function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; cle
 function show(id){ for(const s of ["lobby","picker","room"]) $("#"+s).hidden = s!==id; }
 function netStatus(msg){ const n=$("#net"); n.textContent=msg||""; n.hidden=!msg; }
 const MODE_LABEL = {c:"Cooperativo",p:"Competitivo",a:"Coop y competitivo",any:"Cualquier modo"};
-const PREFIX = "aqj-steam-v1-";
+const PREFIX = "aqj-steam/v2/";
 
 /* ---------- Catálogo: games.json, que una GitHub Action regenera a diario desde la API de Steam ---------- */
 let THEMES=[], CATALOG=[], BY_ID={}, CAT_VERSION="";
@@ -303,7 +303,7 @@ try{ uid=sessionStorage.getItem("clientId"); }catch(e){}
 if(!uid){ uid=Math.random().toString(36).slice(2)+Date.now().toString(36); try{ sessionStorage.setItem("clientId",uid); }catch(e){} }
 
 const S = { code:null, room:null, votes:{}, mine:null, dismissed:new Set(), topId:null, confirmReset:false, nick:"" };
-const NET = { peer:null, isHost:false, H:null, conns:new Set(), hostConn:null, connected:false, everConnected:false, leaving:false, retryT:null, tries:0 };
+const NET = { client:null, isHost:false, H:null, ready:false, everConnected:false, leaving:false, timer:null, stateTimer:null };
 
 /* ---------- Lobby ---------- */
 // El apodo se recuerda por pestaña (y en el navegador como valor por defecto).
@@ -330,7 +330,7 @@ function needNick(errEl){
 }
 function peerReady(errEl){
   if(!CATALOG.length){ errEl.textContent="El catálogo de juegos aún no se ha cargado. Espera un momento o recarga la página."; return false; }
-  if(typeof Peer==="undefined"){ errEl.textContent="No se pudo cargar la conexión entre navegadores. Revisa tu conexión a internet y recarga."; return false; }
+  if(typeof mqtt==="undefined"){ errEl.textContent="No se pudo cargar el sistema de conexión. Revisa tu conexión a internet y recarga."; return false; }
   return true;
 }
 
@@ -370,7 +370,24 @@ function joinCode(code){
   startGuest(code,nick);
 }
 
-/* ---------- Anfitrión: su navegador guarda la sala y la reparte ---------- */
+/* ---------- Red: mensajes por un servidor MQTT público (WebSocket seguro). Sin cuentas y sin conexión directa
+   entre navegadores, así funciona detrás de cualquier router o red móvil. El anfitrión manda: guarda la sala,
+   la publica como mensaje «retenido» (quien entra la recibe al momento) y recibe los votos de los demás. ---------- */
+const BROKER="wss://broker.emqx.io:8084/mqtt";
+const topicOf=(code,kind)=>`${PREFIX}${code}/${kind}`;
+function connectBroker(onConnect){
+  const c=mqtt.connect(BROKER,{ clientId:"aqj_"+uid+"_"+Math.random().toString(36).slice(2,6), connectTimeout:10000, reconnectPeriod:2000, keepalive:30, clean:true });
+  NET.client=c;
+  c.on("connect",()=>{ if(!NET.leaving) onConnect(c); });
+  c.on("reconnect",()=>{ if(!NET.leaving) netStatus("Reconectando…"); });
+  c.on("offline",()=>{ if(!NET.leaving) netStatus("Sin conexión a internet. Reintentando…"); });
+  c.on("error",()=>{});
+  return c;
+}
+function send(code,kind,obj){ try{ NET.client?.publish(topicOf(code,kind),JSON.stringify(obj),{qos:1}); }catch(e){} }
+function parse(buf){ if(!buf||!buf.length) return null; try{ return JSON.parse(buf.toString()); }catch(e){ return undefined; } }
+
+/* ---------- Anfitrión ---------- */
 function startHost(code, nick, state, isNew){
   resetSession(code,nick); NET.isHost=true; NET.H=state;
   if(state.hostId && state.hostId!==uid){ uid=state.hostId; try{ sessionStorage.setItem("clientId",uid); }catch(e){} }
@@ -380,49 +397,50 @@ function startHost(code, nick, state, isNew){
   S.mine = me ? {...me, likes:[...me.likes], nopes:[...me.nopes], themes:[...me.themes]} : { round:state.round, likes:[], nopes:[], themes:[], themesSet:false, rev:0 };
   state.members[uid]={...S.mine, name:nick, joinedAt:me?.joinedAt||Date.now(), online:true};
   netStatus("Abriendo la sala…");
-  const open=()=>{
-    const peer=new Peer(PREFIX+code); NET.peer=peer;
-    peer.on("open",()=>{
-      NET.tries=0; netStatus(""); store.set("hosting",code); store.set("lastRoom",code);
-      if(isNew) history.replaceState(null,"","#"+code);
-      hostBroadcast(); enterRoomUI();
-    });
-    peer.on("connection",conn=>hostAccept(conn));
-    peer.on("disconnected",()=>{ if(!NET.leaving){ netStatus("Reconectando con el servidor…"); setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); } });
-    peer.on("error",e=>{
-      if(e.type==="unavailable-id"){
-        peer.destroy();
-        if(isNew){ $("#createBtn").click(); return; } // código ocupado: probar otro
-        if(++NET.tries<12){ netStatus("Recuperando tu sala… (unos segundos)"); setTimeout(open,3000); }
-        else { netStatus(""); toast("No se pudo recuperar la sala. Crea una nueva."); exitRoom(); }
-      } else if(["network","server-error","socket-error","socket-closed"].includes(e.type)){
-        netStatus("Sin conexión con el servidor. Reintentando…");
-      }
-    });
-  };
-  open();
+  const c=connectBroker(c=>{
+    c.subscribe(topicOf(code,"up"),{qos:1});
+    if(NET.ready){ netStatus(""); hostBroadcast(); return; }
+    if(!isNew) return hostReady(code,false);
+    // Sala nueva: comprobar que nadie más está usando ese código.
+    c.subscribe(topicOf(code,"state"),{qos:1});
+    setTimeout(()=>{
+      c.unsubscribe(topicOf(code,"state"));
+      if(NET.taken){ teardown(); $("#createBtn").click(); return; }
+      hostReady(code,true);
+    },1500);
+  });
+  c.on("message",(t,m)=>{
+    if(t===topicOf(code,"state")){ const st=parse(m); if(st && st.hostId!==uid && Date.now()-(st.hostSeen||0)<6*3600e3) NET.taken=true; return; }
+    if(t===topicOf(code,"up")){ const msg=parse(m); if(msg) hostHandle(msg); }
+  });
 }
-function hostAccept(conn){
-  conn.on("open",()=>NET.conns.add(conn));
-  conn.on("data",msg=>hostHandle(conn,msg));
-  conn.on("close",()=>{ NET.conns.delete(conn); const m=conn.clientId&&NET.H.members[conn.clientId]; if(m){ m.online=false; hostBroadcast(); } });
-  conn.on("error",()=>{});
+function hostReady(code,isNew){
+  NET.ready=true; netStatus(""); store.set("hosting",code); store.set("lastRoom",code);
+  if(isNew) history.replaceState(null,"","#"+code);
+  hostBroadcast(); enterRoomUI();
+  clearInterval(NET.timer); NET.timer=setInterval(hostSweep,15000);
 }
-function hostHandle(conn,msg){
-  const H=NET.H; if(!msg||typeof msg!=="object") return;
-  const id=String(msg.id||conn.clientId||""); if(!id) return;
+function hostSweep(){
+  const now=Date.now();
+  for(const [id,m] of Object.entries(NET.H.members)) if(id!==uid) m.online=now-(m.lastSeen||0)<60000;
+  hostBroadcast(); // también es el latido: los invitados saben que el anfitrión sigue conectado
+}
+function hostHandle(msg){
+  const H=NET.H; if(!H||typeof msg!=="object") return;
+  const id=String(msg.id||""); if(!id||id===uid) return;
   const clean=m=>({ name:String(m?.name||"Alguien").slice(0,20), round:+m?.round||0, rev:+m?.rev||0,
     likes:(Array.isArray(m?.likes)?m.likes:[]).filter(x=>BY_ID[x]), nopes:(Array.isArray(m?.nopes)?m.nopes:[]).filter(x=>BY_ID[x]),
     themes:(Array.isArray(m?.themes)?m.themes:[]).filter(k=>THEMES.some(t=>t.key===k)), themesSet:!!m?.themesSet });
   if(msg.t==="hello"||msg.t==="me"){
-    conn.clientId=id;
     const m=clean(msg.member), cur=H.members[id];
-    if(!cur){ H.members[id]={ ...m, round:H.round, likes:m.round===H.round?m.likes:[], nopes:m.round===H.round?m.nopes:[], joinedAt:Date.now(), online:true }; }
+    const prev=cur?{...cur}:null; if(prev) delete prev.lastSeen;
+    if(!cur){ H.members[id]={ ...m, round:H.round, likes:m.round===H.round?m.likes:[], nopes:m.round===H.round?m.nopes:[], joinedAt:Date.now(), online:true, lastSeen:Date.now() }; }
     else {
-      cur.name=m.name; cur.themes=m.themes; cur.themesSet=m.themesSet; cur.online=true;
+      cur.name=m.name; cur.themes=m.themes; cur.themesSet=m.themesSet; cur.online=true; cur.lastSeen=Date.now();
       if(m.round===H.round && m.rev>=(cur.rev||0)){ cur.likes=m.likes; cur.nopes=m.nopes; cur.rev=m.rev; }
     }
-    hostBroadcast();
+    const after={...H.members[id]}; delete after.lastSeen;
+    if(JSON.stringify(prev)!==JSON.stringify(after)) hostBroadcast();
   } else if(msg.t==="round"){ hostNewRound(); }
   else if(msg.t==="leave"){ delete H.members[id]; hostBroadcast(); }
 }
@@ -440,45 +458,65 @@ function hostBroadcast(){
   store.set("host:"+H.code, JSON.stringify(H));
   applyState(H);
   clearTimeout(bcT);
-  bcT=setTimeout(()=>{ const msg={t:"state",state:H}; NET.conns.forEach(c=>{ try{ if(c.open) c.send(msg); }catch(e){} }); },60);
+  bcT=setTimeout(()=>{
+    if(!NET.ready||!NET.client) return;
+    H.hostSeen=Date.now();
+    try{ NET.client.publish(topicOf(H.code,"state"),JSON.stringify(H),{qos:1,retain:true}); }catch(e){}
+  },80);
 }
 
-/* ---------- Invitado: se conecta al navegador del anfitrión ---------- */
+/* ---------- Invitado ---------- */
 function startGuest(code,nick){
   resetSession(code,nick); NET.isHost=false;
   const saved=store.json("mine:"+code);
   S.mine = saved || { round:0, likes:[], nopes:[], themes:[], themesSet:false, rev:0 };
-  netStatus(`Conectando con la sala ${code}…`);
-  const peer=new Peer(); NET.peer=peer;
-  peer.on("open",()=>guestConnect());
-  peer.on("disconnected",()=>{ if(!NET.leaving) setTimeout(()=>{ try{ peer.reconnect(); }catch(e){} },1500); });
-  peer.on("error",e=>{
-    if(e.type==="peer-unavailable"){
-      if(!NET.everConnected){ netStatus(""); $("#joinErr").textContent=`No hay ninguna sala abierta con el código ${code}. Comprueba el código o pide al anfitrión que abra la página.`; exitRoom(true); }
-      else { netStatus("El anfitrión se ha desconectado. Esperando a que vuelva…"); scheduleRetry(); }
-    } else if(["network","server-error","socket-error","socket-closed"].includes(e.type)){ netStatus("Sin conexión. Reintentando…"); scheduleRetry(); }
+  netStatus(`Buscando la sala ${code}…`);
+  NET.stateTimer=setTimeout(()=>{
+    if(NET.everConnected) return;
+    netStatus(""); $("#joinErr").textContent=`No hay ninguna sala con el código ${code}. Comprueba el código o pide al anfitrión que abra la página.`; exitRoom(true);
+  },9000);
+  const c=connectBroker(c=>{
+    c.subscribe(topicOf(code,"state"),{qos:1});
+    if(NET.everConnected){ guestHello(); guestWatch(); }
   });
+  c.on("message",(t,m)=>{
+    if(t!==topicOf(code,"state")) return;
+    const st=parse(m);
+    if(st===null){ // sala borrada por el anfitrión
+      if(NET.everConnected){ toast("El anfitrión ha cerrado la sala."); store.del("mine:"+code); store.del("lastRoom"); exitRoom(); }
+      return;
+    }
+    if(!st||!st.members) return;
+    const first=!NET.everConnected;
+    NET.everConnected=true; NET.lastState=Date.now();
+    NET.hostAway = first && Date.now()-(st.hostSeen||0)>120000; // estado retenido antiguo: el anfitrión no está
+    clearTimeout(NET.stateTimer);
+    applyState(st);
+    if(first) guestHello();
+    if($("#room").hidden&&$("#picker").hidden) enterRoomUI();
+    guestWatch();
+  });
+  clearInterval(NET.timer); NET.timer=setInterval(()=>{ if(NET.everConnected){ guestHello(); guestWatch(); } },20000);
 }
-function guestConnect(){
-  if(NET.leaving||!NET.peer||NET.peer.destroyed) return;
-  if(NET.peer.disconnected){ try{ NET.peer.reconnect(); }catch(e){} scheduleRetry(); return; }
-  const conn=NET.peer.connect(PREFIX+S.code,{reliable:true}); NET.hostConn=conn;
-  conn.on("open",()=>{ NET.connected=true; NET.everConnected=true; netStatus(""); conn.send({t:"hello",id:uid,member:mineRecord()}); });
-  conn.on("data",msg=>{ if(msg?.t==="state") { applyState(msg.state); if($("#room").hidden&&$("#picker").hidden) enterRoomUI(); } });
-  conn.on("close",()=>{ NET.connected=false; if(!NET.leaving){ netStatus("Se perdió la conexión con el anfitrión. Reconectando…"); scheduleRetry(); } });
-  conn.on("error",()=>{});
+function guestHello(){ send(S.code,"up",{t:"hello",id:uid,member:mineRecord()}); }
+function guestWatch(){
+  if(!NET.everConnected||NET.client?.connected===false) return;
+  const away=NET.hostAway||Date.now()-NET.lastState>50000;
+  netStatus(away?"El anfitrión no está conectado ahora mismo. Tus votos se guardarán cuando vuelva.":"");
 }
-function scheduleRetry(){ clearTimeout(NET.retryT); NET.retryT=setTimeout(guestConnect,3000); }
 function mineRecord(){ return { name:S.nick, round:S.mine.round, rev:S.mine.rev, likes:S.mine.likes, nopes:S.mine.nopes, themes:S.mine.themes, themesSet:S.mine.themesSet }; }
 
 /* ---------- Común ---------- */
 function resetSession(code,nick){
   teardown();
   Object.assign(S,{ code, nick, room:null, votes:{}, mine:null, dismissed:new Set(), topId:null, confirmReset:false });
-  Object.assign(NET,{ leaving:false, connected:false, everConnected:false, tries:0, conns:new Set(), hostConn:null, H:null });
+  Object.assign(NET,{ leaving:false, everConnected:false, ready:false, taken:false, hostAway:false, lastState:0, H:null, client:null });
   $("#rCode").textContent=code;
 }
-function teardown(){ clearTimeout(NET.retryT); if(NET.peer){ NET.leaving=true; try{ NET.peer.destroy(); }catch(e){} NET.peer=null; } }
+function teardown(){
+  clearInterval(NET.timer); clearTimeout(NET.stateTimer); clearTimeout(bcT);
+  if(NET.client){ NET.leaving=true; const c=NET.client; NET.client=null; try{ c.end(true); }catch(e){} }
+}
 
 let catSyncing=false;
 function applyState(st){
@@ -510,7 +548,7 @@ function saveMine(){
   S.mine.rev=(S.mine.rev||0)+1;
   if(NET.isHost){ hostBroadcast(); return; }
   store.set("mine:"+S.code, JSON.stringify(S.mine));
-  try{ if(NET.hostConn?.open) NET.hostConn.send({t:"me",id:uid,member:mineRecord()}); }catch(e){}
+  send(S.code,"up",{t:"me",id:uid,member:mineRecord()});
 }
 function exitRoom(keepError){
   teardown(); S.code=null; S.room=null; netStatus("");
@@ -521,14 +559,16 @@ function exitRoom(keepError){
 
 $("#leaveBtn").addEventListener("click",()=>{
   if(NET.isHost){ $("#leaveConfirm").hidden=false; return; }
-  try{ NET.hostConn?.open && NET.hostConn.send({t:"leave",id:uid}); }catch(e){}
+  send(S.code,"up",{t:"leave",id:uid});
   const code=S.code; store.del("mine:"+code); store.del("lastRoom");
-  setTimeout(()=>exitRoom(),150); toast(`Has salido de la sala ${code}.`);
+  setTimeout(()=>exitRoom(),300); toast(`Has salido de la sala ${code}.`);
 });
 $("#leaveNo").addEventListener("click",()=>{ $("#leaveConfirm").hidden=true; });
 $("#leaveYes").addEventListener("click",()=>{
   const code=S.code; store.del("host:"+code); store.del("hosting"); store.del("lastRoom");
-  exitRoom(); toast(`Has cerrado la sala ${code}.`);
+  const done=()=>{ if(S.code!==code) return; exitRoom(); toast(`Has cerrado la sala ${code}.`); };
+  try{ NET.client.publish(topicOf(code,"state"),"",{qos:1,retain:true},done); setTimeout(done,1500); }
+  catch(e){ done(); }
 });
 $("#copyBtn").addEventListener("click",async()=>{
   const link=`${location.origin}${location.pathname}#${S.code}`;
@@ -637,7 +677,7 @@ function renderRank(t){
   $("#resetYes")?.addEventListener("click",()=>{
     S.confirmReset=false;
     if(NET.isHost) hostNewRound();
-    else { try{ NET.hostConn.send({t:"round",id:uid}); }catch(e){ toast("No hay conexión con el anfitrión."); } }
+    else send(S.code,"up",{t:"round",id:uid});
     toast("Nueva ronda: todos los votos a cero.");
   });
 }
