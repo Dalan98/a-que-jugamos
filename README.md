@@ -13,7 +13,7 @@ Web para decidir entre amigos a qué juego de Steam jugar, deslizando cartas al 
 
 1. Una persona crea la sala y comparte el enlace de «Invitar».
 2. Cada uno elige sus temáticas y desliza: → sí, ← no.
-3. Un «no» descarta el juego para todos. Lo que gusta a alguien aparece primero en el mazo de los demás.
+3. Cada uno vota todos los juegos por su cuenta: un «no» no se los quita a los demás. Lo que gusta a alguien aparece antes en el mazo del resto.
 4. Cuando a todos los conectados les gusta el mismo juego: ¡match!
 
 El anfitrión debe tener la página abierta mientras se vota. Si la recarga, la sala se recupera.

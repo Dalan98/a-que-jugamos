@@ -135,7 +135,7 @@ button.link{background:none;border:0;padding:4px 0;color:var(--muted);font-weigh
 
   <!-- LOBBY -->
   <section id="lobby" class="stack">
-    <p class="muted">Cread una sala y elegid vuestras temáticas favoritas. Deslizad a la derecha los juegos de Steam que os apetezcan y a la izquierda los que no. Un solo «no» descarta el juego para todos. Cuando a alguien le gusta uno, aparece en el mazo de los demás. Si a todos os gusta el mismo, hay match.</p>
+    <p class="muted">Cread una sala y elegid vuestras temáticas favoritas. Deslizad a la derecha los juegos de Steam que os apetezcan y a la izquierda los que no. Cada uno vota por su cuenta todos los juegos. Cuando a alguien le gusta uno, aparece antes en el mazo de los demás. Si a todos os gusta el mismo, hay match.</p>
     <p class="muted small" id="catInfo"></p>
 
     <div class="panel">
@@ -608,10 +608,10 @@ function tally(){
   }
   members.sort((a,b)=>a.joinedAt-b.joinedAt);
   const online=members.filter(m=>m.online);
-  const nope=new Set(), likes={}, likesOn={};
-  members.forEach(m=>{ m.nopes.forEach(id=>nope.add(id)); m.likes.forEach(id=>{ likes[id]=(likes[id]||0)+1; if(m.online) likesOn[id]=(likesOn[id]||0)+1; }); });
-  const pool=roomPool(r.filters);
-  const alive=pool.filter(g=>!nope.has(g.id));
+  // Votaciones independientes: el «no» de alguien no quita el juego a los demás; solo impide el match mientras siga en la sala.
+  const nopes={}, likes={}, likesOn={};
+  members.forEach(m=>{ m.nopes.forEach(id=>nopes[id]=(nopes[id]||0)+1); m.likes.forEach(id=>{ likes[id]=(likes[id]||0)+1; if(m.online) likesOn[id]=(likesOn[id]||0)+1; }); });
+  const alive=roomPool(r.filters);
   const matches = online.length>=2 ? alive.filter(g=>likesOn[g.id]===online.length).map(g=>g.id) : [];
   // Mazo personal: primero lo que ya gusta a otros, luego mis temáticas, luego el resto.
   const voted=new Set([...S.mine.likes,...S.mine.nopes]);
@@ -624,7 +624,7 @@ function tally(){
   const fits=g=>!mineT.size||g.themes.some(t=>mineT.has(t));
   const personal=left.filter(g=>!likes[g.id]&&fits(g)).sort(byWeight);
   const rest=left.filter(g=>!likes[g.id]&&!fits(g)).sort(byWeight);
-  return { members, online, likes, alive, matches, queue:[...proposals,...personal,...rest].map(g=>g.id), nopeCount:nope.size, personalLeft:personal.length+proposals.length };
+  return { members, online, likes, alive, matches, queue:[...proposals,...personal,...rest].map(g=>g.id), nopes, personalLeft:personal.length+proposals.length };
 }
 
 function dot(m){ return `<span class="dot" style="background:hsl(${hash(m.id)%360} 75% 68%)">${esc(m.name.slice(0,1).toUpperCase())}</span>`; }
@@ -634,7 +634,7 @@ function render(){
   const t=tally();
   $("#members").innerHTML=t.members.map(m=>`<span class="chip ${m.online?"":"off"}" title="${m.online?"":"Desconectado"}">${dot(m)}${esc(m.name)}${m.me?" (tú)":""} <span class="prog">${m.online?`${m.likes.length+m.nopes.length} votos`:"desconectado"}</span></span>`).join("");
   const nT=S.mine.themes.length;
-  $("#stats").innerHTML=`<span>Ronda <b>${S.room.round}</b></span><span><b>${t.alive.length}</b> en juego</span><span><b>${t.nopeCount}</b> descartados</span><button class="link" id="themesBtn">${nT?`Mis temáticas (${nT})`:"Elegir temáticas"}</button>`;
+  $("#stats").innerHTML=`<span>Ronda <b>${S.room.round}</b></span><span><b>${t.alive.length}</b> juegos</span><span>Te quedan <b>${t.queue.length}</b> por votar</span><button class="link" id="themesBtn">${nT?`Mis temáticas (${nT})`:"Elegir temáticas"}</button>`;
   $("#themesBtn").onclick=openPicker;
 
   const newMatch=t.matches.find(id=>!S.dismissed.has(id));
@@ -666,7 +666,7 @@ function render(){
 function renderRank(t){
   const n=t.online.length;
   const top=t.alive.filter(g=>t.likes[g.id]).sort((a,b)=>t.likes[b.id]-t.likes[a.id]||a.pop-b.pop).slice(0,5);
-  const rows=top.length?top.map(g=>`<div class="rank-row"><span>${esc(g.name)}</span><span class="num">${t.likes[g.id]}/${n}</span><span class="bar"><i style="width:${Math.min(100,Math.round(t.likes[g.id]/n*100))}%"></i></span></div>`).join("")
+  const rows=top.length?top.map(g=>`<div class="rank-row"><span>${esc(g.name)}</span><span class="num">${t.likes[g.id]}/${n} sí${t.nopes[g.id]?` · ${t.nopes[g.id]} no`:""}</span><span class="bar"><i style="width:${Math.min(100,Math.round(t.likes[g.id]/n*100))}%"></i></span></div>`).join("")
     :`<p class="muted small">Aún no hay votos a favor. Los juegos que gusten aparecerán aquí.</p>`;
   const reset=S.confirmReset
     ?`<div class="confirm"><span>¿Borrar los votos de todos y empezar otra ronda?</span><button id="resetYes">Sí, empezar de nuevo</button><button class="link" id="resetNo">Cancelar</button></div>`
